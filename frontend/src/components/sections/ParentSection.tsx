@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Users, Clock, CalendarDays, ChevronDown, ChevronUp, Filter } from 'lucide-react';
+import { Users, Clock, CalendarDays, ChevronDown, ChevronUp, Filter, Bell, BellOff } from 'lucide-react';
 import { useTimezone } from '../../hooks/useTimezone';
+import { subscribeToPush, isPushSubscribed, unsubscribeFromPush } from '../../utils/pushNotifications';
 
 interface ChildRecord {
   id: number;
@@ -31,7 +32,7 @@ interface AttendanceRecord {
 
 interface Props {
   token: string;
-  user: { name: string };
+  user: { id?: string; name: string };
 }
 
 const statusColor: Record<string, string> = {
@@ -61,10 +62,33 @@ export const ParentSection: React.FC<Props> = ({ token, user }) => {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [expandedChild, setExpandedChild] = useState<number | null>(null);
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushLoading, setPushLoading] = useState(false);
 
   useEffect(() => {
     fetchChildren();
   }, []);
+
+  useEffect(() => {
+    if (!user.id) return;
+    isPushSubscribed().then(setPushEnabled);
+  }, [user.id]);
+
+  const handleTogglePush = async () => {
+    if (!user.id) return;
+    setPushLoading(true);
+    try {
+      if (pushEnabled) {
+        await unsubscribeFromPush(token, user.id);
+        setPushEnabled(false);
+      } else {
+        const ok = await subscribeToPush(token, user.id);
+        setPushEnabled(ok);
+      }
+    } catch { /* ignore */ } finally {
+      setPushLoading(false);
+    }
+  };
 
   const fetchChildren = async () => {
     setLoading(true);
@@ -131,6 +155,29 @@ export const ParentSection: React.FC<Props> = ({ token, user }) => {
       </div>
 
       {errorMsg && <div className="px-6 py-3 text-destructive text-xs">{errorMsg}</div>}
+
+      <div className="px-6 pt-4">
+        <div className={`flex items-center justify-between p-3 rounded-xl border ${
+          pushEnabled ? 'bg-emerald-500/5 border-emerald-500/10' : 'bg-muted/30 border-border'
+        }`}>
+          <div className="flex items-center gap-2">
+            {pushEnabled ? <Bell className="w-4 h-4 text-emerald-500" /> : <BellOff className="w-4 h-4 text-muted-foreground" />}
+            <span className="text-xs text-foreground">
+              {pushEnabled ? 'Notifikasi aktif — Anda akan menerima notifikasi browser jika WhatsApp gagal' : 'Aktifkan notifikasi browser sebagai cadangan jika WhatsApp tidak tersedia'}
+            </span>
+          </div>
+          <button
+            onClick={handleTogglePush}
+            disabled={pushLoading}
+            className={`px-3 py-1.5 rounded-lg text-2xs font-bold transition-all ${
+              pushEnabled
+                ? 'bg-destructive/10 text-destructive hover:bg-destructive/20'
+                : 'bg-primary text-primary-foreground hover:bg-primary/90'
+            } disabled:opacity-50`}>
+            {pushLoading ? '...' : pushEnabled ? 'Nonaktifkan' : 'Aktifkan'}
+          </button>
+        </div>
+      </div>
 
       <div className="p-6 space-y-6">
         {loading ? (

@@ -240,3 +240,13 @@ export const notifications = mysqlTable('notifications', {
   sentAt: timestamp('sent_at'),
   createdAt: timestamp('created_at').defaultNow(),
 });
+
+export const pushSubscriptions = mysqlTable('push_subscriptions', {
+  id: int('id').autoincrement().primaryKey(),
+  userId: varchar('user_id', { length: 36 }).references(() => user.id).notNull(),
+  endpoint: text('endpoint').notNull(),
+  p256dh: text('p256dh').notNull(),
+  auth: text('auth').notNull(),
+  userAgent: varchar('user_agent', { length: 500 }),
+  createdAt: timestamp('created_at').defaultNow(),
+});

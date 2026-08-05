@@ -2,6 +2,7 @@ import { db } from '../db/index.js';
 import { notifications, user, students } from '../db/schema.js';
 import { eq, and, gte, lte, desc, count, sql } from 'drizzle-orm';
 import { waService } from './waService.js';
+import { pushService } from './pushService.js';
 import { settingService } from './settingService.js';
 import { formatTimeWIB, formatDateWIB, getSchoolDate } from '../lib/timezone.js';
 
@@ -73,6 +74,45 @@ class NotificationService {
     return DEFAULT_TEMPLATES;
   }
 
+  private async sendPushFallback(
+    parentId: string,
+    studentName: string,
+    type: 'CHECKIN' | 'CHECKOUT',
+    timeStr: string,
+    statusLabel?: string,
+  ) {
+    if (!pushService.isConfigured()) return;
+
+    const typeLabel = type === 'CHECKIN' ? 'Check-in' : 'Check-out';
+    let body: string;
+    if (type === 'CHECKIN' && statusLabel === 'Terlambat') {
+      body = `${studentName} telah tiba di sekolah pada ${timeStr} (Terlambat).`;
+    } else if (type === 'CHECKIN') {
+      body = `${studentName} telah tiba di sekolah pada ${timeStr}.`;
+    } else {
+      body = `${studentName} telah pulang pada pukul ${timeStr}.`;
+    }
+
+    const pushResult = await pushService.sendPushNotification(parentId, {
+      title: `HadirQ - ${typeLabel}`,
+      body,
+      url: '/dashboard/orang-tua',
+    });
+
+    if (pushResult.sent > 0) {
+      console.log(`[Push] ${typeLabel} sent to parent (${pushResult.sent} device(s))`);
+      await db.insert(notifications).values({
+        studentId: 0,
+        type,
+        channel: 'webpush',
+        recipient: parentId,
+        message: body,
+        status: 'SENT',
+        sentAt: getSchoolDate(),
+      });
+    }
+  }
+
   async sendCheckInNotification(
     student: StudentInfo,
     attendanceDate: string,
@@ -124,6 +164,11 @@ class NotificationService {
       error: result.error,
       sentAt: result.success ? getSchoolDate() : null,
     });
+
+    if (!result.success) {
+      console.log(`[Push] WA failed for ${student.name}, trying push fallback...`);
+      this.sendPushFallback(student.parentId!, student.name, 'CHECKIN', timeStr, statusLabel).catch(() => {});
+    }
   }
 
   async sendCheckOutNotification(
@@ -172,6 +217,11 @@ class NotificationService {
       error: result.error,
       sentAt: result.success ? getSchoolDate() : null,
     });
+
+    if (!result.success) {
+      console.log(`[Push] WA failed for ${student.name}, trying push fallback...`);
+      this.sendPushFallback(student.parentId!, student.name, 'CHECKOUT', timeStr).catch(() => {});
+    }
   }
 
   async getNotifications(filters: {

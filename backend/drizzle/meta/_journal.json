@@ -36,6 +36,13 @@
       "when": 1785242991634,
       "tag": "0004_loose_nitro",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1785911253959,
+      "tag": "0005_push_subscriptions",
+      "breakpoints": true
     }
   ]
 }

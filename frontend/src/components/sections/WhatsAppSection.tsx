@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { MessageCircle, RefreshCw, Wifi, WifiOff, ScanLine, Smartphone, CheckCircle2, XCircle, Clock, TrendingUp, Filter, Copy, FileText, RotateCcw, Save, Eye } from 'lucide-react';
+import { MessageCircle, RefreshCw, Wifi, WifiOff, ScanLine, Smartphone, CheckCircle2, XCircle, Clock, TrendingUp, Filter, Copy, FileText, RotateCcw, Save, Eye, Bell } from 'lucide-react';
 
 interface Props {
   token: string;
@@ -55,6 +55,7 @@ export const WhatsAppSection: React.FC<Props> = ({ token }) => {
   const [templateSaving, setTemplateSaving] = useState(false);
   const [templateMsg, setTemplateMsg] = useState('');
   const [previewTab, setPreviewTab] = useState<'checkin' | 'checkout'>('checkin');
+  const [pushSubCount, setPushSubCount] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -118,6 +119,18 @@ export const WhatsAppSection: React.FC<Props> = ({ token }) => {
       } catch { /* ignore */ }
     };
     fetchTemplates();
+  }, [authHeader]);
+
+  // Fetch push subscription count
+  useEffect(() => {
+    const fetchPushCount = async () => {
+      try {
+        const res = await fetch('/api/push/subscriptions', { headers: authHeader });
+        const data = await res.json();
+        if (data.success) setPushSubCount(data.data.count || 0);
+      } catch { /* ignore */ }
+    };
+    fetchPushCount();
   }, [authHeader]);
 
   const handleInit = async (usePairing = false) => {
@@ -299,6 +312,15 @@ export const WhatsAppSection: React.FC<Props> = ({ token }) => {
                 Notifikasi check-in/check-out dikirim otomatis ke nomor WA orang tua.
               </p>
             </div>
+          </div>
+        )}
+
+        {pushSubCount > 0 && (
+          <div className="flex items-center gap-2 p-3 rounded-xl bg-blue-500/5 border border-blue-500/10">
+            <Bell className="w-4 h-4 text-blue-500" />
+            <span className="text-xs text-foreground">
+              <span className="font-bold">{pushSubCount}</span> orang tua telah mengaktifkan notifikasi browser sebagai cadangan.
+            </span>
           </div>
         )}
 

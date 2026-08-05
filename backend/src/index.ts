@@ -33,6 +33,7 @@ import { agendaAttendanceRouter } from './routes/agendaAttendanceRoutes.js';
 import { faceRegistrationRouter } from './routes/faceRegistrationRoutes.js';
 import { teacherAttendanceRouter } from './routes/teacherAttendanceRoutes.js';
 import { waRouter } from './routes/waRoutes.js';
+import { pushRouter } from './routes/pushRoutes.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -191,6 +192,7 @@ app.use('/api/parents', authMiddleware, requireRole(['admin']), parentAdminRoute
 app.use('/api/parent', authMiddleware, requireRole(['parent']), parentDashboardRouter);
 app.use('/api/teacher-attendance', teacherAttendanceRouter);
 app.use('/api/wa', authMiddleware, requireRole(['admin']), waRouter);
+app.use('/api/push', authMiddleware, pushRouter);
 
 // Serve uploaded images statically (authenticated — prevents anonymous PII access)
 app.use('/uploads', authMiddleware);
