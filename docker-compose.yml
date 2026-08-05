@@ -47,6 +47,9 @@ services:
       - MAX_ACCURACY_METERS=${MAX_ACCURACY_METERS:-30}
       - KIOSK_SECRET_KEY=${KIOSK_SECRET_KEY:-absensi123456}
       - WA_PROXY_URL=${WA_PROXY_URL:-}
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
+      - VAPID_SUBJECT=${VAPID_SUBJECT:-mailto:admin@presensimipi.web.id}
     volumes:
       - uploads_data:/app/backend/uploads
       - baileys_auth_data:/app/backend/baileys_auth_info

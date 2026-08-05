@@ -192,6 +192,13 @@ app.use('/api/parents', authMiddleware, requireRole(['admin']), parentAdminRoute
 app.use('/api/parent', authMiddleware, requireRole(['parent']), parentDashboardRouter);
 app.use('/api/teacher-attendance', teacherAttendanceRouter);
 app.use('/api/wa', authMiddleware, requireRole(['admin']), waRouter);
+app.get('/api/push/vapid-public-key', (_req, res) => {
+  const key = process.env.VAPID_PUBLIC_KEY || '';
+  if (!key) {
+    return res.status(503).json({ success: false, error: 'Push notifications not configured' });
+  }
+  res.json({ success: true, data: { publicKey: key } });
+});
 app.use('/api/push', authMiddleware, pushRouter);
 
 // Serve uploaded images statically (authenticated — prevents anonymous PII access)

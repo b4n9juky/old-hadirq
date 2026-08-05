@@ -3,14 +3,6 @@ import { pushService } from '../services/pushService.js';
 
 export const pushRouter = Router();
 
-pushRouter.get('/vapid-public-key', (_req: Request, res: Response) => {
-  const key = pushService.getVapidPublicKey();
-  if (!key) {
-    return res.status(503).json({ success: false, error: 'Push notifications not configured' });
-  }
-  res.json({ success: true, data: { publicKey: key } });
-});
-
 pushRouter.post('/subscribe', async (req: Request, res: Response) => {
   try {
     const uid = req.context?.user?.id;
