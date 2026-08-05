@@ -66,4 +66,18 @@ academicYearRouter.put('/:id/activate', async (req, res) => {
     res.status(400).json({ success: false, error: err.message });
   }
 });
+// DELETE an academic year (admin only — guarded by mount)
+academicYearRouter.delete('/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      return res.status(400).json({ success: false, error: 'ID tidak valid.' });
+    }
+    await academicYearService.deleteYear(id);
+    res.json({ success: true, message: 'Tahun ajaran berhasil dihapus.' });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
 export const academicYearsRouter = academicYearRouter;

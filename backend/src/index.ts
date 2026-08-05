@@ -40,6 +40,15 @@ const PORT = process.env.PORT || 3000;
 // Trust proxy — OpenLiteSpeed reverse proxy mengirim X-Forwarded-For
 app.set('trust proxy', 1);
 
+// Normalize duplicate Origin headers (OpenLiteSpeed proxy can cause duplicates)
+app.use((req, _res, next) => {
+  const origin = req.headers.origin;
+  if (typeof origin === 'string' && origin.includes(',')) {
+    req.headers.origin = origin.split(',')[0].trim();
+  }
+  next();
+});
+
 // Security headers
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
@@ -183,7 +192,8 @@ app.use('/api/parent', authMiddleware, requireRole(['parent']), parentDashboardR
 app.use('/api/teacher-attendance', teacherAttendanceRouter);
 app.use('/api/wa', authMiddleware, requireRole(['admin']), waRouter);
 
-// Serve uploaded images statically
+// Serve uploaded images statically (authenticated — prevents anonymous PII access)
+app.use('/uploads', authMiddleware);
 const uploadDir = path.join(__dirname, '../uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -208,6 +218,11 @@ app.get('/api/templates/download/:type', (req, res) => {
     return res.status(404).json({ success: false, error: 'File template tidak ditemukan.' });
   }
   res.download(filePath, filename);
+});
+
+// Health check (no auth) — used by container HEALTHCHECK
+app.get('/api/health', (_req, res) => {
+  res.json({ success: true, status: 'ok' });
 });
 
 // SPA fallback — semua non-API route arahkan ke index.html

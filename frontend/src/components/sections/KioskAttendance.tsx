@@ -3,7 +3,7 @@ import * as faceapi from '@vladmandic/face-api';
 import { Camera, CheckCircle2, UserCircle, Maximize2, Minimize2, Clock, Users, RefreshCw } from 'lucide-react';
 import { useAttendanceSound } from '../../hooks/useAttendanceSound';
 import { useTimezone } from '../../hooks/useTimezone';
-import { getVideoDevices, getDefaultDeviceId, getCameraConstraints } from '../../utils/camera';
+import { getVideoDevices, getCameraConstraints, pickCameraDevices, getCameraGridClass, loadKioskCameraCount } from '../../utils/camera';
 
 interface StudentEmbedding {
   id: number;
@@ -22,6 +22,53 @@ interface RecentArrival {
   className: string;
   status: string;
   checkinTime: string;
+}
+
+interface ActivityItem {
+  id: number;
+  name: string;
+  isSuccess: boolean;
+  message: string;
+  photo?: string | null;
+}
+
+interface BulkCheckinResult {
+  success: boolean;
+  message: string;
+  studentId?: number;
+  studentNis?: string;
+  studentName?: string;
+  studentPhoto?: string | null;
+}
+
+const COOLDOWN_MS = 4000;
+const FLUSH_MS = 300;
+const GPS_MAX_AGE_MS = 60000;
+
+function tryAcquireStudent(cooldown: Map<number, number>, studentId: number): boolean {
+  const now = Date.now();
+  const last = cooldown.get(studentId) ?? 0;
+  if (now - last < COOLDOWN_MS) return false;
+  cooldown.set(studentId, now);
+  return true;
+}
+
+function findBestMatch(students: StudentEmbedding[], descriptor: Float32Array) {
+  let best = { id: -1, distance: 1.0, name: '' };
+  let second = { id: -1, distance: 1.0, name: '' };
+  for (const student of students) {
+    const minDist = student.faceEmbedding.reduce((min, emb) => {
+      const d = faceapi.euclideanDistance(descriptor, new Float32Array(emb));
+      return d < min ? d : min;
+    }, Infinity);
+    if (minDist < best.distance) {
+      second = best;
+      best = { id: student.id, distance: minDist, name: student.studentName || student.nis };
+    } else if (minDist < second.distance) {
+      second = { id: student.id, distance: minDist, name: student.studentName || student.nis };
+    }
+  }
+  return { ...best, margin: second.distance - best.distance };
 }
 
 const RecentArrivalsPanel = memo(({ arrivals, timezone }: { arrivals: RecentArrival[]; timezone: string }) => {
@@ -51,7 +98,7 @@ const RecentArrivalsPanel = memo(({ arrivals, timezone }: { arrivals: RecentArri
   };
 
   return (
-    <div className="w-1/2 flex-1 min-h-0 flex flex-col bg-zinc-900/50 border-l border-zinc-800/50">
+    <div className="w-80 flex-none min-h-0 flex flex-col bg-zinc-900/50 border-l border-zinc-800/50">
       <div className="flex-shrink-0 px-6 py-4 border-b border-zinc-800/50">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -134,28 +181,32 @@ const RecentArrivalsPanel = memo(({ arrivals, timezone }: { arrivals: RecentArri
 RecentArrivalsPanel.displayName = 'RecentArrivalsPanel';
 
 export const KioskAttendance = () => {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const videoRefs = useRef<Array<HTMLVideoElement | null>>([]);
+  const canvasRefs = useRef<Array<HTMLCanvasElement | null>>([]);
+  const streamsRef = useRef<Array<MediaStream | null>>([]);
+  const scanIntervalsRef = useRef<Array<NodeJS.Timeout | null>>([]);
+  const cooldownRef = useRef<Map<number, number>>(new Map());
+  const gpsRef = useRef<{ lat?: number; lng?: number; acc?: number; time: number }>({ time: 0 });
+  const pendingBatchRef = useRef<Map<number, number>>(new Map());
+  const flushTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const activityIdRef = useRef(0);
+  const lastSoundRef = useRef(0);
 
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [studentsData, setStudentsData] = useState<StudentEmbedding[]>([]);
   const [statusMsg, setStatusMsg] = useState('Memuat sistem kiosk...');
-  const [matchResult, setMatchResult] = useState<{name: string, isSuccess: boolean, message: string, photo?: string} | null>(null);
+  const [activityQueue, setActivityQueue] = useState<ActivityItem[]>([]);
   const [kioskKey, setKioskKey] = useState<string | null>(localStorage.getItem('kiosk_secret_key'));
   const [inputKey, setInputKey] = useState('');
   const [authError, setAuthError] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [recentArrivals, setRecentArrivals] = useState<RecentArrival[]>([]);
   const [authLoading, setAuthLoading] = useState(false);
-  const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedCameraId, setSelectedCameraId] = useState<string | undefined>(undefined);
-  const [showCameraPicker, setShowCameraPicker] = useState(false);
+  const [activeCameras, setActiveCameras] = useState<string[]>([]);
+  const [currentTime, setCurrentTime] = useState(new Date());
 
-  const isScanningRef = useRef(true);
   const studentsDataRef = useRef<StudentEmbedding[]>([]);
   const modelsLoadedRef = useRef(false);
-  const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const [currentTime, setCurrentTime] = useState(new Date());
 
   const { playAttendanceSound } = useAttendanceSound();
   const schoolTimezone = useTimezone();
@@ -193,37 +244,115 @@ export const KioskAttendance = () => {
     } catch { /* ignore */ }
   }, [kioskKey]);
 
-  const startVideo = useCallback((deviceId?: string) => {
-    setStatusMsg('Mengakses kamera...');
-    navigator.mediaDevices.getUserMedia({
-      video: getCameraConstraints(deviceId ?? selectedCameraId)
-    }).then(async stream => {
-      let attempts = 0;
-      while (!videoRef.current && attempts < 10) { await new Promise(r => setTimeout(r, 50)); attempts++; }
-      if (videoRef.current) {
-        if (videoRef.current.srcObject) {
-          (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
-        }
-        videoRef.current.srcObject = stream;
-      }
-      setStatusMsg('Sistem siap. Silakan berdiri di depan kamera.');
-    }).catch(() => { setStatusMsg('Kamera tidak ditemukan atau ditolak.'); });
-  }, [selectedCameraId]);
+  const pushActivity = useCallback((item: Omit<ActivityItem, 'id'>) => {
+    const id = ++activityIdRef.current;
+    setActivityQueue(q => [...q.slice(-4), { ...item, id }]);
+    setTimeout(() => {
+      setActivityQueue(q => q.filter(a => a.id !== id));
+    }, 4500);
+  }, []);
 
-  const switchCamera = useCallback(async (deviceId: string) => {
-    setSelectedCameraId(deviceId);
-    startVideo(deviceId);
-    setShowCameraPicker(false);
-  }, [startVideo]);
-
-  const refreshCameras = useCallback(async () => {
-    const devices = await getVideoDevices();
-    setCameraDevices(devices);
-    if (!selectedCameraId && devices.length > 0) {
-      const defaultId = getDefaultDeviceId(devices);
-      setSelectedCameraId(defaultId);
+  const getGps = useCallback(async (): Promise<{ lat?: number; lng?: number; acc?: number }> => {
+    const now = Date.now();
+    if (gpsRef.current.lat !== undefined && now - gpsRef.current.time < GPS_MAX_AGE_MS) {
+      return { lat: gpsRef.current.lat, lng: gpsRef.current.lng, acc: gpsRef.current.acc };
     }
-  }, [selectedCameraId]);
+    try {
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
+      });
+      gpsRef.current = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy, time: now };
+      return { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy };
+    } catch {
+      return { lat: gpsRef.current.lat, lng: gpsRef.current.lng, acc: gpsRef.current.acc };
+    }
+  }, []);
+
+  const checkinBatch = useCallback(async (ids: number[]) => {
+    if (!kioskKey || ids.length === 0) return;
+    const gps = await getGps();
+    try {
+      const res = await fetch('/api/kiosk/checkin-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-kiosk-token': kioskKey },
+        body: JSON.stringify({
+          entries: ids.map(id => ({ studentId: id, latitude: gps.lat, longitude: gps.lng, accuracy: gps.acc }))
+        })
+      });
+      const data = await res.json() as { success: boolean; successCount?: number; results?: BulkCheckinResult[] };
+      if (data.success && Array.isArray(data.results)) {
+        let played = false;
+        for (const r of data.results) {
+          pushActivity({
+            name: r.studentName || r.studentNis || 'Siswa',
+            isSuccess: !!r.success,
+            message: r.message,
+            photo: r.studentPhoto,
+          });
+          if (!played && Date.now() - lastSoundRef.current > 800) {
+            playAttendanceSound(!!r.success, r.message);
+            lastSoundRef.current = Date.now();
+            played = true;
+          }
+        }
+        if (data.results.some(r => r.success)) fetchRecentArrivals();
+      }
+    } catch {
+      pushActivity({ name: 'Jaringan', isSuccess: false, message: 'Kesalahan jaringan.' });
+    }
+  }, [kioskKey, getGps, pushActivity, playAttendanceSound, fetchRecentArrivals]);
+
+  const scheduleFlush = () => {
+    if (flushTimerRef.current) return;
+    flushTimerRef.current = setTimeout(() => {
+      flushTimerRef.current = null;
+      const ids = [...pendingBatchRef.current.keys()];
+      pendingBatchRef.current.clear();
+      if (ids.length > 0) checkinBatch(ids);
+    }, FLUSH_MS);
+  };
+
+  const startCameras = useCallback(async () => {
+    if (!kioskKey) return;
+    streamsRef.current.forEach(s => s?.getTracks().forEach(t => t.stop()));
+    streamsRef.current = [];
+    scanIntervalsRef.current.forEach(iv => { if (iv) clearInterval(iv); });
+    scanIntervalsRef.current = [];
+    if (flushTimerRef.current) { clearTimeout(flushTimerRef.current); flushTimerRef.current = null; }
+    setStatusMsg('Mengakses kamera...');
+    const devices = await getVideoDevices();
+    if (devices.length === 0) {
+      setActiveCameras([]);
+      setStatusMsg('Kamera tidak ditemukan atau ditolak.');
+      return;
+    }
+    let desired = 1;
+    try {
+      desired = await loadKioskCameraCount(kioskKey);
+    } catch { /* ignore */ }
+    const picked = pickCameraDevices(devices, desired);
+    const ids = picked.map(d => d.deviceId);
+    setActiveCameras(ids);
+
+    const streams: (MediaStream | null)[] = [];
+    for (const id of ids) {
+      try {
+        streams.push(await navigator.mediaDevices.getUserMedia({ video: getCameraConstraints(id) }));
+      } catch {
+        streams.push(null);
+      }
+    }
+    streamsRef.current = streams;
+
+    await new Promise(r => setTimeout(r, 150));
+    for (let i = 0; i < streams.length; i++) {
+      const video = videoRefs.current[i];
+      if (video && streams[i] && !video.srcObject) {
+        video.srcObject = streams[i];
+      }
+    }
+    setStatusMsg(ids.length > 1 ? `Sistem siap. ${ids.length} kamera aktif. Silakan berdiri di depan kamera.` : 'Sistem siap. Silakan berdiri di depan kamera.');
+  }, [kioskKey]);
 
   useEffect(() => {
     if (!kioskKey) return;
@@ -246,8 +375,7 @@ export const KioskAttendance = () => {
           faceapi.nets.faceRecognitionNet.loadFromUri('/models')
         ]);
         setModelsLoaded(true);
-        await refreshCameras();
-        startVideo();
+        await startCameras();
       } catch { setStatusMsg('Gagal memuat AI Models.'); }
     };
 
@@ -257,99 +385,57 @@ export const KioskAttendance = () => {
     const arrivalInterval = setInterval(fetchRecentArrivals, 10000);
 
     return () => {
-      if (scanIntervalRef.current) clearInterval(scanIntervalRef.current);
+      scanIntervalsRef.current.forEach(iv => { if (iv) clearInterval(iv); });
+      scanIntervalsRef.current = [];
+      if (flushTimerRef.current) { clearTimeout(flushTimerRef.current); flushTimerRef.current = null; }
       clearInterval(arrivalInterval);
-      if (videoRef.current?.srcObject) {
-        (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
-      }
+      streamsRef.current.forEach(s => s?.getTracks().forEach(t => t.stop()));
+      streamsRef.current = [];
     };
-  }, [kioskKey, startVideo, fetchRecentArrivals, refreshCameras]);
+  }, [kioskKey, startCameras, fetchRecentArrivals]);
 
-  const handleVideoPlay = useCallback(() => {
-    if (scanIntervalRef.current) clearInterval(scanIntervalRef.current);
+  const handleFeedPlay = (index: number) => {
+    const intervalMs = activeCameras.length >= 3 ? 1000 : 500;
+    if (scanIntervalsRef.current[index]) clearInterval(scanIntervalsRef.current[index]);
+    scanIntervalsRef.current[index] = setInterval(async () => {
+      const video = videoRefs.current[index];
+      if (!video || !modelsLoadedRef.current || studentsDataRef.current.length === 0) return;
+      if (video.paused || video.ended || video.videoWidth === 0) return;
 
-    scanIntervalRef.current = setInterval(async () => {
-      if (!isScanningRef.current || !videoRef.current || !modelsLoadedRef.current || studentsDataRef.current.length === 0) return;
-      if (videoRef.current.paused || videoRef.current.ended || videoRef.current.videoWidth === 0) return;
-
-      let detections = await faceapi.detectAllFaces(videoRef.current, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
+      let detections = await faceapi.detectAllFaces(video, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
         .withFaceLandmarks().withFaceDescriptors();
 
       if (detections.length === 0) {
-        detections = await faceapi.detectAllFaces(videoRef.current, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.3 }))
+        detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.3 }))
           .withFaceLandmarks().withFaceDescriptors();
       }
 
-      if (canvasRef.current && videoRef.current) {
-        const displaySize = { width: videoRef.current.videoWidth, height: videoRef.current.videoHeight };
+      const canvas = canvasRefs.current[index];
+      if (canvas && video) {
+        const displaySize = { width: video.videoWidth, height: video.videoHeight };
         if (displaySize.width > 0) {
-          faceapi.matchDimensions(canvasRef.current, displaySize);
+          faceapi.matchDimensions(canvas, displaySize);
           const resized = faceapi.resizeResults(detections, displaySize);
-          canvasRef.current.getContext('2d')?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-          faceapi.draw.drawDetections(canvasRef.current, resized);
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            faceapi.draw.drawDetections(canvas, resized);
+          }
         }
       }
 
       if (detections.length > 0) {
-        let bestMatch = { id: -1, distance: 1.0, name: '' };
-        let secondBest = { id: -1, distance: 1.0, name: '' };
-        const descriptor = detections[0].descriptor;
-        for (const student of studentsDataRef.current) {
-          const minDist = student.faceEmbedding.reduce((min, emb) => {
-            const d = faceapi.euclideanDistance(descriptor, new Float32Array(emb));
-            return d < min ? d : min;
-          }, Infinity);
-          if (minDist < bestMatch.distance) {
-            secondBest = bestMatch;
-            bestMatch = { id: student.id, distance: minDist, name: student.studentName || student.nis };
-          } else if (minDist < secondBest.distance) {
-            secondBest = { id: student.id, distance: minDist, name: student.studentName || student.nis };
+        for (const detection of detections) {
+          const match = findBestMatch(studentsDataRef.current, detection.descriptor);
+          if (match.id === -1 || match.distance >= 0.4 || match.margin <= 0.05) continue;
+          if (tryAcquireStudent(cooldownRef.current, match.id)) {
+            pendingBatchRef.current.set(match.id, Date.now());
+            scheduleFlush();
           }
         }
-        const margin = secondBest.distance - bestMatch.distance;
-        if (bestMatch.distance < 0.4 && margin > 0.05 && isScanningRef.current) {
-          isScanningRef.current = false;
-          processCheckin(bestMatch.id, bestMatch.name);
-        }
       }
-    }, 500);
-  }, []);
-
-  const processCheckin = useCallback(async (studentId: number, name: string) => {
-    if (!kioskKey) return;
-    try {
-      let lat: number | undefined, lng: number | undefined, acc: number | undefined;
-      try {
-        const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
-        });
-        lat = pos.coords.latitude;
-        lng = pos.coords.longitude;
-        acc = pos.coords.accuracy;
-      } catch {
-        /* GPS unavailable — proceed without location */
-      }
-
-      const res = await fetch('/api/kiosk/checkin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-kiosk-token': kioskKey },
-        body: JSON.stringify({ studentId, latitude: lat, longitude: lng, accuracy: acc })
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setMatchResult({ name: data.data.studentName || name, isSuccess: true, message: data.message, photo: data.data.studentPhoto });
-        playAttendanceSound(true, data.message);
-        fetchRecentArrivals();
-      } else {
-        setMatchResult({ name, isSuccess: false, message: data.error || 'Gagal check-in', photo: undefined });
-        playAttendanceSound(false, data.error || 'Gagal check-in');
-      }
-    } catch {
-      setMatchResult({ name, isSuccess: false, message: 'Kesalahan jaringan', photo: undefined });
-      playAttendanceSound(false, 'Kesalahan jaringan');
-    }
-    setTimeout(() => { setMatchResult(null); isScanningRef.current = true; }, 4000);
-  }, [kioskKey, fetchRecentArrivals, playAttendanceSound]);
+    }, intervalMs);
+  };
 
   if (!kioskKey) {
     const handleAuthSubmit = async (e: React.FormEvent) => {
@@ -357,7 +443,6 @@ export const KioskAttendance = () => {
       setAuthError('');
       setAuthLoading(true);
 
-      // 1. Validate kiosk key first
       try {
         const res = await fetch('/api/kiosk/embeddings', { headers: { 'x-kiosk-token': inputKey } });
         if (res.status === 401) { setAuthError('Kunci Kiosk tidak valid.'); setAuthLoading(false); return; }
@@ -365,7 +450,6 @@ export const KioskAttendance = () => {
         if (!res.ok || !data.success) { setAuthError(data.error || 'Kunci Kiosk tidak valid.'); setAuthLoading(false); return; }
       } catch { setAuthError('Gagal terhubung ke server.'); setAuthLoading(false); return; }
 
-      // 2. Geofence check — require GPS, compare against school location
       try {
         const [posRes, locRes] = await Promise.all([
           new Promise<GeolocationPosition>((resolve, reject) => {
@@ -433,7 +517,7 @@ export const KioskAttendance = () => {
           </div>
           <div>
             <h1 className="text-lg font-bold text-white">Kiosk Absensi</h1>
-            <p className="text-xs text-zinc-500">{studentsData.length} wajah terdaftar</p>
+            <p className="text-xs text-zinc-500">{studentsData.length} wajah terdaftar · {activeCameras.length} kamera</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -444,71 +528,69 @@ export const KioskAttendance = () => {
             </span>
           </div>
           <p className="text-sm text-zinc-400" role="status">{statusMsg}</p>
-          {cameraDevices.length > 1 && (
-            <div className="relative">
-              <button onClick={() => setShowCameraPicker(v => !v)}
-                className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-primary hover:text-primary/70 transition-colors"
-                title="Ganti Kamera" aria-label="Ganti Kamera">
-                <RefreshCw className="w-4 h-4" />
-              </button>
-              {showCameraPicker && (
-                <div className="absolute right-0 top-full mt-2 w-64 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl z-50 overflow-hidden">
-                  {cameraDevices.map(d => (
-                    <button key={d.deviceId}
-                      onClick={() => switchCamera(d.deviceId)}
-                      className={`w-full text-left px-4 py-3 text-sm border-b border-zinc-800 last:border-b-0 transition-colors ${
-                        d.deviceId === selectedCameraId
-                          ? 'bg-primary/10 text-primary font-bold'
-                          : 'text-zinc-300 hover:bg-zinc-800'
-                      }`}>
-                      {d.label || `Kamera ${d.deviceId.slice(0, 8)}...`}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          <button onClick={() => startCameras()} className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-primary hover:text-primary/70 transition-colors" title="Perbarui Kamera" aria-label="Perbarui Kamera">
+            <RefreshCw className="w-4 h-4" />
+          </button>
           <button onClick={handleToggleFullscreen} className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-primary hover:text-primary/70 transition-colors" title="Layar Penuh" aria-label="Layar Penuh">
             {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </button>
         </div>
       </div>
 
-      {/* Main Content - Split Screen */}
+      {/* Main Content */}
       <div className="flex-1 flex min-h-0">
-        {/* Left Side - Camera Feed */}
-        <div className="w-1/2 relative bg-zinc-950 flex items-center justify-center">
-          <video ref={videoRef} autoPlay muted playsInline onPlay={handleVideoPlay}
-            className="absolute min-w-full min-h-full object-cover transform -scale-x-100 opacity-80" />
-          <canvas ref={canvasRef} className="absolute min-w-full min-h-full object-cover transform -scale-x-100 z-10 pointer-events-none" />
-          <div className="z-10 w-56 h-72 border-4 border-dashed border-primary/50 rounded-full animate-pulse flex items-center justify-center pointer-events-none">
-            <div className="w-full h-full border-2 border-solid border-primary rounded-full opacity-30"></div>
-          </div>
-          <div className="absolute bottom-4 left-4 z-20 flex items-center gap-2 px-3 py-2 rounded-xl bg-black/60 backdrop-blur-sm border border-zinc-800/50" role="status">
-            <div className="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
-            <span className="text-xs text-zinc-400">Kamera Aktif</span>
-          </div>
-
-          {/* Result Overlay — scoped to camera side only */}
-          <div
-            className="absolute inset-0 z-30 flex items-center justify-center"
-            style={{ visibility: matchResult ? 'visible' : 'hidden', contain: 'strict' }}
-          >
-            <div className="w-full h-full flex items-center justify-center bg-black/80">
-              <div className={`p-8 rounded-3xl flex flex-col items-center text-center max-w-sm w-full mx-4 shadow-2xl transition-opacity duration-200 ${matchResult?.isSuccess ? 'bg-primary/40 border border-primary/50' : 'bg-destructive/40 border border-destructive/50'}`}
-                style={{ opacity: matchResult ? 1 : 0 }} role="alert">
-                {matchResult?.photo ? (
-                  <img src={matchResult.photo} alt={matchResult.name}
-                    className="w-24 h-24 rounded-full object-cover border-4 border-primary/50 shadow-lg mb-4" />
-                ) : matchResult?.isSuccess ? (
-                  <CheckCircle2 className="w-20 h-20 text-primary mb-4 drop-shadow-lg" />
-                ) : (
-                  <UserCircle className="w-20 h-20 text-destructive mb-4 drop-shadow-lg" />
-                )}
-                <h2 className="text-2xl font-bold mb-2 text-white">{matchResult?.name}</h2>
-                <p className="text-base text-gray-300">{matchResult?.message}</p>
-              </div>
+        {/* Camera Feeds */}
+        <div className={`flex-1 min-w-0 relative bg-zinc-950 grid gap-1 ${getCameraGridClass(activeCameras.length)} min-h-0`}>
+          {activeCameras.length === 0 ? (
+            <div className="col-span-full flex flex-col items-center justify-center text-center p-6">
+              <Camera className="w-16 h-16 text-zinc-700 mb-4" />
+              <p className="text-zinc-500 text-sm font-medium">Kamera tidak ditemukan</p>
+              <p className="text-zinc-600 text-xs mt-1">Periksa koneksi kamera lalu tekan tombol perbarui.</p>
             </div>
+          ) : (
+            activeCameras.map((deviceId, i) => (
+              <div key={deviceId} className="relative min-h-0 overflow-hidden">
+                <video
+                  ref={(el) => { videoRefs.current[i] = el; }}
+                  autoPlay muted playsInline onPlay={() => handleFeedPlay(i)}
+                  className="absolute inset-0 w-full h-full object-cover transform -scale-x-100 opacity-80"
+                />
+                <canvas
+                  ref={(el) => { canvasRefs.current[i] = el; }}
+                  className="absolute inset-0 w-full h-full object-cover transform -scale-x-100 z-10 pointer-events-none"
+                />
+                <div className="absolute inset-0 z-10 pointer-events-none flex items-center justify-center">
+                  <div className="w-40 h-52 border-4 border-dashed border-primary/50 rounded-full animate-pulse">
+                    <div className="w-full h-full border-2 border-solid border-primary rounded-full opacity-30"></div>
+                  </div>
+                </div>
+                <div className="absolute bottom-3 left-3 z-20 flex items-center gap-2 px-3 py-1.5 rounded-xl bg-black/60 backdrop-blur-sm border border-zinc-800/50" role="status">
+                  <div className="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
+                  <span className="text-xs text-zinc-400">Kamera {i + 1}</span>
+                </div>
+              </div>
+            ))
+          )}
+
+          {/* Activity Notifications */}
+          <div className="absolute top-4 right-4 z-40 w-80 space-y-2 pointer-events-none">
+            {activityQueue.map(a => (
+              <div key={a.id} className={`p-4 rounded-2xl border shadow-2xl backdrop-blur-sm ${a.isSuccess ? 'bg-primary/40 border-primary/50' : 'bg-destructive/40 border-destructive/50'}`} role="alert">
+                <div className="flex items-center gap-3">
+                  {a.photo ? (
+                    <img src={a.photo} alt={a.name} className="w-12 h-12 rounded-full object-cover border-2 border-white/20 flex-shrink-0" />
+                  ) : a.isSuccess ? (
+                    <CheckCircle2 className="w-12 h-12 text-primary flex-shrink-0" />
+                  ) : (
+                    <UserCircle className="w-12 h-12 text-destructive flex-shrink-0" />
+                  )}
+                  <div className="min-w-0">
+                    <h3 className="text-base font-bold text-white truncate">{a.name}</h3>
+                    <p className="text-xs text-gray-300 leading-snug">{a.message}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 

@@ -88,6 +88,10 @@ export interface ExcelStudentRow {
   nis: string;
   name: string;
   className: string;
+  parentName?: string;
+  parentEmail?: string;
+  parentPassword?: string;
+  parentPhone?: string;
 }
 
 export interface StudentParseResult {
@@ -115,6 +119,12 @@ export function parseExcelStudentFile(filePath: string): StudentParseResult {
   const nameKey = keys.find(k => k.toLowerCase().trim() === 'name' || k.toLowerCase().trim() === 'nama');
   const classKey = keys.find(k => k.toLowerCase().trim() === 'class' || k.toLowerCase().trim() === 'kelas');
 
+  // Optional parent columns
+  const parentNameKey = keys.find(k => ['nama orang tua', 'nama ortu', 'orang tua', 'parent name'].includes(k.toLowerCase().trim()));
+  const parentEmailKey = keys.find(k => ['email orang tua', 'email ortu', 'parent email', 'email'].includes(k.toLowerCase().trim()));
+  const parentPasswordKey = keys.find(k => ['password orang tua', 'password ortu', 'kata sandi orang tua', 'password', 'kata sandi'].includes(k.toLowerCase().trim()));
+  const parentPhoneKey = keys.find(k => ['no hp', 'nomer hp', 'nomor hp', 'hp', 'phone', 'telepon', 'no. wa', 'nowa', 'nomor wa'].includes(k.toLowerCase().trim()));
+
   if (!nisKey || !nameKey || !classKey) {
     throw new Error(
       'Format kolom tidak sesuai. File harus memiliki kolom: NIS, Name/Nama, Kelas/Class.'
@@ -129,6 +139,11 @@ export function parseExcelStudentFile(filePath: string): StudentParseResult {
     const nis = String(item[nisKey] || '').trim();
     const name = String(item[nameKey] || '').trim();
     const className = String(item[classKey] || '').trim();
+
+    const parentName = parentNameKey ? String(item[parentNameKey] || '').trim() : '';
+    const parentEmail = parentEmailKey ? String(item[parentEmailKey] || '').trim() : '';
+    const parentPassword = parentPasswordKey ? String(item[parentPasswordKey] || '').trim() : '';
+    const parentPhone = parentPhoneKey ? String(item[parentPhoneKey] || '').trim() : '';
 
     const rowNum = i + 2;
 
@@ -145,7 +160,15 @@ export function parseExcelStudentFile(filePath: string): StudentParseResult {
       continue;
     }
 
-    rows.push({ nis, name, className });
+    rows.push({
+      nis,
+      name,
+      className,
+      parentName: parentName || undefined,
+      parentEmail: parentEmail || undefined,
+      parentPassword: parentPassword || undefined,
+      parentPhone: parentPhone || undefined,
+    });
   }
 
   return { rows, errors };

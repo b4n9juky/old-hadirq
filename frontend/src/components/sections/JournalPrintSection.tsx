@@ -9,6 +9,7 @@ interface Props {
 
 const monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+let autoTableFn: any = null;
 
 export const JournalPrintSection: React.FC<Props> = ({ token, user }) => {
   const today = new Date();
@@ -151,7 +152,8 @@ export const JournalPrintSection: React.FC<Props> = ({ token, user }) => {
           doc.setFont('helvetica', 'bold');
           doc.text(`${sched.startTime?.slice(0, 5) || ''} - ${sched.endTime?.slice(0, 5) || ''}`, doc.internal.pageSize.getWidth() - 50, yPos + 5);
           doc.setFont('helvetica', 'normal');
-          doc.text(`H:${sched.presentCount} S:${sched.sickCount} I:${sched.excusedCount} A:${sched.absentCount}`, doc.internal.pageSize.getWidth() - 55, yPos + 13);
+          doc.setFontSize(8);
+          doc.text(`Hadir: ${sched.presentCount} | Sakit: ${sched.sickCount} | Izin: ${sched.excusedCount} | Alfa: ${sched.absentCount} | Dispensasi: ${sched.dispensationCount || 0} | Tidak Diisi: ${sched.skippedCount || 0}`, doc.internal.pageSize.getWidth() - 105, yPos + 13);
           yPos += 20;
 
           if (sched.materi || sched.kegiatan || sched.catatanKendala) {
@@ -203,7 +205,7 @@ export const JournalPrintSection: React.FC<Props> = ({ token, user }) => {
       ['Total Alfa', String(stats.totalAbsent || 0), 'siswa'],
     ];
 
-    (doc as any).autoTable({
+    autoTableFn(doc, {
       startY: 30,
       head: [['Keterangan', 'Jumlah', 'Satuan']],
       body: summaryRows,
@@ -230,7 +232,8 @@ export const JournalPrintSection: React.FC<Props> = ({ token, user }) => {
     setGenerating(true);
     try {
       const { default: jsPDF } = await import('jspdf');
-      await import('jspdf-autotable');
+      const autoTableMod: any = await import('jspdf-autotable');
+      autoTableFn = autoTableMod.autoTable || autoTableMod.default;
 
       const doc = new jsPDF('p', 'mm', 'a4');
       generateCoverPage(doc, journalData.teacher?.name || '');
@@ -350,10 +353,12 @@ export const JournalPrintSection: React.FC<Props> = ({ token, user }) => {
                                 <div key={i} className="text-2xs text-muted-foreground flex flex-wrap gap-x-3">
                                   <span className="font-semibold text-foreground">{s.className} - {s.subject}</span>
                                   <span>{s.startTime?.slice(0, 5)}-{s.endTime?.slice(0, 5)}</span>
-                                  <span className="text-emerald-500">H:{s.presentCount}</span>
-                                  {s.sickCount > 0 && <span className="text-blue-500">S:{s.sickCount}</span>}
-                                  {s.excusedCount > 0 && <span className="text-purple-500">I:{s.excusedCount}</span>}
-                                  {s.absentCount > 0 && <span className="text-rose-500">A:{s.absentCount}</span>}
+                                  <span className="text-emerald-500">Hadir: {s.presentCount}</span>
+                                  {s.sickCount > 0 && <span className="text-blue-500">Sakit: {s.sickCount}</span>}
+                                  {s.excusedCount > 0 && <span className="text-purple-500">Izin: {s.excusedCount}</span>}
+                                  {s.absentCount > 0 && <span className="text-rose-500">Alfa: {s.absentCount}</span>}
+                                  {s.dispensationCount > 0 && <span className="text-amber-500">Dispensasi: {s.dispensationCount}</span>}
+                                  {s.skippedCount > 0 && <span className="text-muted-foreground">Tidak Diisi: {s.skippedCount}</span>}
                                 </div>
                               ))}
                             </div>

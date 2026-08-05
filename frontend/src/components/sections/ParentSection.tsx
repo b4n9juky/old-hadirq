@@ -27,7 +27,6 @@ interface AttendanceRecord {
   checkinTime?: string | null;
   checkoutTime?: string | null;
   checkinPhoto?: string | null;
-  isVerified: boolean;
 }
 
 interface Props {

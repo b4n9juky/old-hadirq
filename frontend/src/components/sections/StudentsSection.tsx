@@ -54,7 +54,7 @@ export const StudentsSection: React.FC<Props> = ({ token }) => {
   // Import Excel state
   const [showImportModal, setShowImportModal] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
-  const [importPreview, setImportPreview] = useState<{ nis: string; name: string; className: string }[]>([]);
+  const [importPreview, setImportPreview] = useState<{ nis: string; name: string; className: string; parentName?: string; parentEmail?: string; parentPhone?: string }[]>([]);
   const [importResult, setImportResult] = useState<{ imported: number; failed: number; results: any[] } | null>(null);
   const [importLoading, setImportLoading] = useState(false);
 
@@ -288,11 +288,17 @@ export const StudentsSection: React.FC<Props> = ({ token }) => {
         const nisKey = keys.find(k => k.toLowerCase().trim() === 'nis' || k.toLowerCase().trim() === 'nomor induk') || 'nis';
         const nameKey = keys.find(k => k.toLowerCase().trim() === 'name' || k.toLowerCase().trim() === 'nama') || 'name';
         const classKey = keys.find(k => k.toLowerCase().trim() === 'class' || k.toLowerCase().trim() === 'kelas') || 'kelas';
+        const parentNameKey = keys.find(k => ['nama orang tua', 'nama ortu', 'orang tua', 'parent name'].includes(k.toLowerCase().trim()));
+        const parentEmailKey = keys.find(k => ['email orang tua', 'email ortu', 'parent email', 'email'].includes(k.toLowerCase().trim()));
+        const parentPhoneKey = keys.find(k => ['no hp', 'nomer hp', 'nomor hp', 'hp', 'phone', 'telepon', 'no. wa', 'nowa', 'nomor wa'].includes(k.toLowerCase().trim()));
 
         const preview = json.slice(0, 5).map((r: any) => ({
           nis: String(r[nisKey] || ''),
           name: String(r[nameKey] || ''),
           className: String(r[classKey] || ''),
+          parentName: parentNameKey ? String(r[parentNameKey] || '') : '',
+          parentEmail: parentEmailKey ? String(r[parentEmailKey] || '') : '',
+          parentPhone: parentPhoneKey ? String(r[parentPhoneKey] || '') : '',
         }));
         setImportPreview(preview);
       } catch { setImportPreview([{ nis: '(gagal baca preview)', name: '', className: '' }]); }
@@ -1044,21 +1050,24 @@ export const StudentsSection: React.FC<Props> = ({ token }) => {
                   <h4 className="text-foreground/80 font-semibold mb-2">Preview (5 baris pertama):</h4>
                   <div className="bg-background rounded-xl overflow-hidden">
                     <table className="w-full text-left text-xs">
-                      <thead><tr className="bg-secondary text-muted-foreground uppercase font-semibold">
-                        <th className="px-3 py-2">NIS</th><th className="px-3 py-2">Nama</th><th className="px-3 py-2">Kelas</th>
-                      </tr></thead>
-                      <tbody className="divide-y divide-border">
-                        {importPreview.map((row, i) => (
-                          <tr key={i} className="text-foreground">
-                            <td className="px-3 py-2">{row.nis || '-'}</td>
-                            <td className="px-3 py-2">{row.name || '-'}</td>
-                            <td className="px-3 py-2">{row.className || '-'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                       <thead><tr className="bg-secondary text-muted-foreground uppercase font-semibold">
+                         <th className="px-3 py-2">NIS</th><th className="px-3 py-2">Nama</th><th className="px-3 py-2">Kelas</th><th className="px-3 py-2">Nama Ortu</th><th className="px-3 py-2">Email Ortu</th><th className="px-3 py-2">No. HP</th>
+                       </tr></thead>
+                       <tbody className="divide-y divide-border">
+                         {importPreview.map((row, i) => (
+                           <tr key={i} className="text-foreground">
+                             <td className="px-3 py-2">{row.nis || '-'}</td>
+                             <td className="px-3 py-2">{row.name || '-'}</td>
+                             <td className="px-3 py-2">{row.className || '-'}</td>
+                             <td className="px-3 py-2">{row.parentName || '-'}</td>
+                             <td className="px-3 py-2">{row.parentEmail || '-'}</td>
+                             <td className="px-3 py-2">{row.parentPhone || '-'}</td>
+                           </tr>
+                         ))}
+                       </tbody>
+                     </table>
                   </div>
-                  <p className="text-muted-foreground text-xs mt-1">Kolom wajib: NIS, Name/Nama, Kelas/Class</p>
+                  <p className="text-muted-foreground text-xs mt-1">Kolom: NIS, Nama, Kelas, Nama Orang Tua, Email, Password, Nomer HP (kolom orang tua opsional)</p>
                 </div>
               )}
             </div>

@@ -153,7 +153,8 @@ export const RecapSection: React.FC<Props> = ({ token }) => {
 
   const handleExportPdf = async () => {
     const { default: jsPDF } = await import('jspdf');
-    await import('jspdf-autotable');
+    const autoTableMod: any = await import('jspdf-autotable');
+    const autoTable = autoTableMod.autoTable || autoTableMod.default;
 
     const doc = new jsPDF('l', 'mm', 'a4');
     const pageWidth = doc.internal.pageSize.getWidth();
@@ -179,7 +180,7 @@ export const RecapSection: React.FC<Props> = ({ token }) => {
       ['Alfa', String(summary.absentCount)],
     ];
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       startY: 32,
       head: [['Keterangan', 'Jumlah']],
       body: summaryData,
@@ -206,7 +207,7 @@ export const RecapSection: React.FC<Props> = ({ token }) => {
     });
 
     const finalY = (doc as any).lastAutoTable.finalY + 10;
-    (doc as any).autoTable({
+    autoTable(doc, {
       startY: finalY,
       head: [pdfColumns],
       body: pdfBody,

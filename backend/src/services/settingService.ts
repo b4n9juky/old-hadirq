@@ -21,6 +21,11 @@ export class SettingService {
       'school_logo',
       'school_days',
       'school_timezone',
+      'kiosk_camera_count',
+      'kiosk_secret_key',
+      'wa_checkin_normal',
+      'wa_checkin_late',
+      'wa_checkout',
     ];
 
     for (const key of Object.keys(entries)) {

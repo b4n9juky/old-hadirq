@@ -47,7 +47,15 @@ export class TeacherAttendanceRepository {
     startDate: string;
     endDate: string;
   }) {
-    let query = db.select({
+    const conditions = [
+      gte(teacherAttendances.attendanceDate, filters.startDate),
+      lte(teacherAttendances.attendanceDate, filters.endDate),
+    ];
+    if (filters.teacherId) {
+      conditions.push(eq(teacherAttendances.teacherId, filters.teacherId));
+    }
+
+    return await db.select({
       id: teacherAttendances.id,
       teacherId: teacherAttendances.teacherId,
       teacherName: user.name,
@@ -61,18 +69,8 @@ export class TeacherAttendanceRepository {
     })
     .from(teacherAttendances)
     .innerJoin(user, eq(teacherAttendances.teacherId, user.id))
-    .where(and(
-      gte(teacherAttendances.attendanceDate, filters.startDate),
-      lte(teacherAttendances.attendanceDate, filters.endDate),
-    ))
-    .orderBy(teacherAttendances.attendanceDate, user.name)
-    .$dynamic();
-
-    if (filters.teacherId) {
-      query = query.where(eq(teacherAttendances.teacherId, filters.teacherId));
-    }
-
-    return await query;
+    .where(and(...conditions))
+    .orderBy(teacherAttendances.attendanceDate, user.name);
   }
 
   async getAdminSummary(filters: {

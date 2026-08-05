@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { MessageCircle, RefreshCw, Wifi, WifiOff, ScanLine, Smartphone, CheckCircle2, XCircle, Clock, TrendingUp, Filter, Copy } from 'lucide-react';
+import { MessageCircle, RefreshCw, Wifi, WifiOff, ScanLine, Smartphone, CheckCircle2, XCircle, Clock, TrendingUp, Filter, Copy, FileText, RotateCcw, Save, Eye } from 'lucide-react';
 
 interface Props {
   token: string;
@@ -49,6 +49,13 @@ export const WhatsAppSection: React.FC<Props> = ({ token }) => {
   const [dateTo, setDateTo] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
 
+  // Template state
+  const [templates, setTemplates] = useState({ wa_checkin_normal: '', wa_checkin_late: '', wa_checkout: '' });
+  const [defaultTemplates, setDefaultTemplates] = useState({ wa_checkin_normal: '', wa_checkin_late: '', wa_checkout: '' });
+  const [templateSaving, setTemplateSaving] = useState(false);
+  const [templateMsg, setTemplateMsg] = useState('');
+  const [previewTab, setPreviewTab] = useState<'checkin' | 'checkout'>('checkin');
+
   useEffect(() => {
     const controller = new AbortController();
     const { signal } = controller;
@@ -87,6 +94,31 @@ export const WhatsAppSection: React.FC<Props> = ({ token }) => {
   useEffect(() => {
     fetchNotifications();
   }, [fetchNotifications]);
+
+  // Fetch templates
+  useEffect(() => {
+    const fetchTemplates = async () => {
+      try {
+        const [settingsRes, defaultsRes] = await Promise.all([
+          fetch('/api/settings', { headers: authHeader }),
+          fetch('/api/settings/templates/defaults', { headers: authHeader }),
+        ]);
+        const settingsData = await settingsRes.json();
+        const defaultsData = await defaultsRes.json();
+        if (settingsData.success && defaultsData.success) {
+          const s = settingsData.data;
+          const d = defaultsData.data;
+          setDefaultTemplates(d);
+          setTemplates({
+            wa_checkin_normal: s.wa_checkin_normal || d.wa_checkin_normal,
+            wa_checkin_late: s.wa_checkin_late || d.wa_checkin_late,
+            wa_checkout: s.wa_checkout || d.wa_checkout,
+          });
+        }
+      } catch { /* ignore */ }
+    };
+    fetchTemplates();
+  }, [authHeader]);
 
   const handleInit = async (usePairing = false) => {
     setLoading(true);
@@ -129,6 +161,44 @@ export const WhatsAppSection: React.FC<Props> = ({ token }) => {
       const data = await res.json();
       if (data.success) setStatus(data.data);
     } catch { /* ignore */ }
+  };
+
+  const handleSaveTemplates = async () => {
+    setTemplateSaving(true);
+    setTemplateMsg('');
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { ...authHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify(templates),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTemplateMsg('Template berhasil disimpan!');
+      } else {
+        setTemplateMsg(data.error || 'Gagal menyimpan template');
+      }
+    } catch {
+      setTemplateMsg('Gagal menghubungi server');
+    } finally {
+      setTemplateSaving(false);
+      setTimeout(() => setTemplateMsg(''), 3000);
+    }
+  };
+
+  const handleResetTemplates = () => {
+    setTemplates({ ...defaultTemplates });
+    setTemplateMsg('Template dikembalikan ke default.');
+    setTimeout(() => setTemplateMsg(''), 3000);
+  };
+
+  const renderPreview = (template: string) => {
+    return template
+      .replace(/\{nama\}/g, 'Ahmad Fauzi')
+      .replace(/\{waktu\}/g, '07:30')
+      .replace(/\{tanggal\}/g, '05 Agustus 2026')
+      .replace(/\{status\}/g, 'Hadir')
+      .replace(/\{kelas\}/g, 'VII A');
   };
 
   const typeLabel: Record<string, string> = { CHECKIN: 'Check-in', CHECKOUT: 'Check-out' };
@@ -384,6 +454,109 @@ export const WhatsAppSection: React.FC<Props> = ({ token }) => {
               Menampilkan {notifications.length} notifikasi terbaru
             </p>
           )}
+        </div>
+      </div>
+
+      {/* Template Editor */}
+      <div className="border-t border-border">
+        <div className="px-6 py-4 border-b border-border bg-muted/10">
+          <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+            <FileText className="w-4 h-4" /> Pesan Template
+          </h3>
+          <p className="text-xs text-muted-foreground mt-1">
+            Kustomisasi pesan notifikasi WhatsApp. Gunakan placeholder: {'{nama}'}, {'{waktu}'}, {'{tanggal}'}, {'{status}'}, {'{kelas}'}
+          </p>
+        </div>
+
+        <div className="p-6 space-y-6">
+          {templateMsg && (
+            <div className={`p-3 rounded-xl text-xs font-semibold ${
+              templateMsg.includes('berhasil') || templateMsg.includes('dikembalikan')
+                ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
+                : 'bg-destructive/10 text-destructive border border-destructive/20'
+            }`}>
+              {templateMsg}
+            </div>
+          )}
+
+          {/* Check-in Normal */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-foreground">Check-in (Tepat Waktu)</label>
+            <textarea
+              value={templates.wa_checkin_normal}
+              onChange={e => setTemplates(prev => ({ ...prev, wa_checkin_normal: e.target.value }))}
+              rows={4}
+              className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground/50 resize-none focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+          </div>
+
+          {/* Check-in Late */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-foreground">Check-in (Terlambat)</label>
+            <textarea
+              value={templates.wa_checkin_late}
+              onChange={e => setTemplates(prev => ({ ...prev, wa_checkin_late: e.target.value }))}
+              rows={4}
+              className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground/50 resize-none focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+          </div>
+
+          {/* Check-out */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-foreground">Check-out</label>
+            <textarea
+              value={templates.wa_checkout}
+              onChange={e => setTemplates(prev => ({ ...prev, wa_checkout: e.target.value }))}
+              rows={4}
+              className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground/50 resize-none focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+          </div>
+
+          {/* Preview */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Eye className="w-4 h-4 text-muted-foreground" />
+              <span className="text-xs font-bold text-foreground">Preview</span>
+              <div className="flex gap-1 ml-2">
+                <button
+                  onClick={() => setPreviewTab('checkin')}
+                  className={`px-3 py-1 rounded-lg text-2xs font-bold transition-all ${
+                    previewTab === 'checkin' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'
+                  }`}>
+                  Check-in
+                </button>
+                <button
+                  onClick={() => setPreviewTab('checkout')}
+                  className={`px-3 py-1 rounded-lg text-2xs font-bold transition-all ${
+                    previewTab === 'checkout' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'
+                  }`}>
+                  Check-out
+                </button>
+              </div>
+            </div>
+            <div className="bg-[#e5ddd5] rounded-xl p-4 border border-border">
+              <div className="bg-white rounded-xl p-4 max-w-sm ml-auto shadow-sm">
+                <p className="text-sm text-[#303030] whitespace-pre-wrap leading-relaxed">
+                  {renderPreview(previewTab === 'checkin' ? templates.wa_checkin_normal : templates.wa_checkout)}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-3 pt-2">
+            <button
+              onClick={handleSaveTemplates}
+              disabled={templateSaving}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold transition-all disabled:opacity-50">
+              <Save className="w-4 h-4" /> {templateSaving ? 'Menyimpan...' : 'Simpan Template'}
+            </button>
+            <button
+              onClick={handleResetTemplates}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-secondary hover:bg-accent border border-border text-foreground text-xs font-bold transition-all">
+              <RotateCcw className="w-4 h-4" /> Reset ke Default
+            </button>
+          </div>
         </div>
       </div>
     </section>

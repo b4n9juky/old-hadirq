@@ -4,6 +4,7 @@ import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { ModalShell } from '../shared/ModalShell';
 import { FormSelect } from '../shared/FormField';
 import { TimePicker } from '../shared/TimePicker';
+import { DAY_LABELS } from '../../utils/days';
 
 interface ScheduleRecord {
   id: number;
@@ -22,10 +23,6 @@ interface TeacherRecord { id: string; name: string; email: string; role: string;
 interface SubjectRecord { id: number; name: string; }
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-const DAY_LABELS: Record<string, string> = {
-  Monday: 'Senin', Tuesday: 'Selasa', Wednesday: 'Rabu', Thursday: 'Kamis',
-  Friday: 'Jumat', Saturday: 'Sabtu', Sunday: 'Minggu',
-};
 
 interface Props { token: string; }
 

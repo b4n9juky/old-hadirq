@@ -58,7 +58,7 @@ Required variables:
 - `APP_TIMEZONE` — School timezone: `Asia/Jakarta` (WIB), `Asia/Makassar` (WITA), `Asia/Jayapura` (WIT). Default: `Asia/Jakarta`.
 
 ### Frontend (`.env`)
-- `GEMINI_API_KEY` — Required for AI features (see `.env.example`)
+- Frontend uses the Vite dev proxy to reach the backend (see `frontend/vite.config.ts`). No required env vars for local dev; optionally set `VITE_API_URL` to override the API base.
 
 ### Android (`app/.env`)
 Uses Secrets Gradle Plugin. Configured for geofence and API URL.

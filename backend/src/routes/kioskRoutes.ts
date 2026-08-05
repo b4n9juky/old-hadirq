@@ -9,10 +9,12 @@ import { settingService } from '../services/settingService.js';
 
 export const kioskRouter = Router();
 
-function getKioskToken(): string {
+async function getKioskToken(): Promise<string> {
+  const dbToken = await settingService.getValue('kiosk_secret_key');
+  if (dbToken && dbToken.trim() !== '') return dbToken.trim();
   const token = process.env.KIOSK_SECRET_KEY;
   if (!token) {
-    throw new Error('KIOSK_SECRET_KEY tidak dikonfigurasi di environment.');
+    throw new Error('KIOSK_SECRET_KEY tidak dikonfigurasi di environment atau pengaturan.');
   }
   return token;
 }
@@ -20,7 +22,7 @@ function getKioskToken(): string {
 kioskRouter.get('/embeddings', async (req, res) => {
   try {
     const kioskToken = req.headers['x-kiosk-token'];
-    const expectedToken = getKioskToken();
+    const expectedToken = await getKioskToken();
     if (!kioskToken || kioskToken !== expectedToken) {
       return res.status(401).json({ success: false, error: 'Unauthorized: Kunci kiosk tidak valid.' });
     }
@@ -34,7 +36,7 @@ kioskRouter.get('/embeddings', async (req, res) => {
 kioskRouter.post('/checkin', async (req, res) => {
   try {
     const kioskToken = req.headers['x-kiosk-token'];
-    const expectedToken = getKioskToken();
+    const expectedToken = await getKioskToken();
     if (!kioskToken || kioskToken !== expectedToken) {
       return res.status(401).json({ success: false, error: 'Unauthorized: Kunci kiosk tidak valid.' });
     }
@@ -87,10 +89,85 @@ kioskRouter.post('/checkin', async (req, res) => {
   }
 });
 
+kioskRouter.post('/checkin-bulk', async (req, res) => {
+  try {
+    const kioskToken = req.headers['x-kiosk-token'];
+    const expectedToken = await getKioskToken();
+    if (!kioskToken || kioskToken !== expectedToken) {
+      return res.status(401).json({ success: false, error: 'Unauthorized: Kunci kiosk tidak valid.' });
+    }
+
+    const { entries } = req.body || {};
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return res.status(400).json({ success: false, error: 'Tidak ada data presensi dikirim.' });
+    }
+    if (entries.length > 20) {
+      return res.status(400).json({ success: false, error: 'Terlalu banyak data dalam satu batch (maksimal 20).' });
+    }
+
+    const results = [];
+    for (const entry of entries) {
+      try {
+        let { studentId, studentNis, status, latitude, longitude, accuracy } = entry || {};
+
+        // If studentNis provided (QR scan), look up student by NIS
+        if (studentNis && !studentId) {
+          const studentRec = await db.select({ id: students.id })
+            .from(students)
+            .where(eq(students.nis, studentNis))
+            .limit(1);
+          if (studentRec.length === 0) {
+            results.push({ success: false, studentNis, message: `Siswa dengan NIS ${studentNis} tidak ditemukan.` });
+            continue;
+          }
+          studentId = studentRec[0].id;
+        }
+
+        const id = parseInt(studentId);
+        if (isNaN(id)) {
+          results.push({ success: false, studentNis, message: 'ID Siswa tidak valid.' });
+          continue;
+        }
+
+        // Look up student once so name/photo/NIS are available for both outcomes
+        const studentRec = await db.select({
+          name: students.name,
+          photo: students.photo,
+          nis: students.nis,
+        }).from(students)
+          .where(eq(students.id, id))
+          .limit(1);
+
+        const lat = latitude !== undefined ? parseFloat(latitude) : undefined;
+        const lng = longitude !== undefined ? parseFloat(longitude) : undefined;
+        const acc = accuracy !== undefined ? parseFloat(accuracy) : undefined;
+
+        const result = await kioskService.processKioskAttendance(id, status, lat, lng, acc);
+
+        results.push({
+          success: result.success,
+          message: result.message,
+          studentId: id,
+          studentNis: studentRec.length > 0 ? studentRec[0].nis : studentNis,
+          studentName: studentRec.length > 0 ? studentRec[0].name : '',
+          studentPhoto: studentRec.length > 0 ? studentRec[0].photo : null,
+        });
+      } catch (err: any) {
+        results.push({ success: false, studentNis: (entry || {}).studentNis, message: err.message || 'Terjadi kesalahan.' });
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+    res.json({ success: true, successCount, results });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 kioskRouter.get('/classes', async (req, res) => {
   try {
     const kioskToken = req.headers['x-kiosk-token'];
-    const expectedToken = getKioskToken();
+    const expectedToken = await getKioskToken();
     if (!kioskToken || kioskToken !== expectedToken) {
       return res.status(401).json({ success: false, error: 'Unauthorized: Kunci kiosk tidak valid.' });
     }
@@ -104,7 +181,7 @@ kioskRouter.get('/classes', async (req, res) => {
 kioskRouter.post('/register-face/:studentId', async (req, res) => {
   try {
     const kioskToken = req.headers['x-kiosk-token'];
-    const expectedToken = getKioskToken();
+    const expectedToken = await getKioskToken();
     if (!kioskToken || kioskToken !== expectedToken) {
       return res.status(401).json({ success: false, error: 'Unauthorized: Kunci kiosk tidak valid.' });
     }
@@ -130,7 +207,7 @@ kioskRouter.post('/register-face/:studentId', async (req, res) => {
 kioskRouter.get('/students-without-face', async (req, res) => {
   try {
     const kioskToken = req.headers['x-kiosk-token'];
-    const expectedToken = getKioskToken();
+    const expectedToken = await getKioskToken();
     if (!kioskToken || kioskToken !== expectedToken) {
       return res.status(401).json({ success: false, error: 'Unauthorized: Kunci kiosk tidak valid.' });
     }
@@ -157,7 +234,7 @@ kioskRouter.get('/students-without-face', async (req, res) => {
 kioskRouter.get('/recent-arrivals', async (req, res) => {
   try {
     const kioskToken = req.headers['x-kiosk-token'];
-    const expectedToken = getKioskToken();
+    const expectedToken = await getKioskToken();
     if (!kioskToken || kioskToken !== expectedToken) {
       return res.status(401).json({ success: false, error: 'Unauthorized: Kunci kiosk tidak valid.' });
     }
@@ -188,10 +265,24 @@ kioskRouter.get('/recent-arrivals', async (req, res) => {
   }
 });
 
+kioskRouter.get('/config', async (req, res) => {
+  try {
+    const kioskToken = req.headers['x-kiosk-token'];
+    const expectedToken = await getKioskToken();
+    if (!kioskToken || kioskToken !== expectedToken) {
+      return res.status(401).json({ success: false, error: 'Unauthorized: Kunci kiosk tidak valid.' });
+    }
+    const config = await kioskService.getKioskConfig();
+    res.json({ success: true, data: config });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 kioskRouter.get('/school-location', async (req, res) => {
   try {
     const kioskToken = req.headers['x-kiosk-token'];
-    const expectedToken = getKioskToken();
+    const expectedToken = await getKioskToken();
     if (!kioskToken || kioskToken !== expectedToken) {
       return res.status(401).json({ success: false, error: 'Unauthorized: Kunci kiosk tidak valid.' });
     }

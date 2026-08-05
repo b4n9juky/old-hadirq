@@ -1,6 +1,8 @@
 import { semesterRepo } from '../repositories/semesterRepository.js';
 import { academicYearRepo } from '../repositories/academicYearRepository.js';
 import { db } from '../db/index.js';
+import { attendances, teacherAgendas } from '../db/schema.js';
+import { eq } from 'drizzle-orm';
 
 export interface CreateSemesterDto {
   academicYearId: number;
@@ -79,6 +81,31 @@ export class SemesterService {
     }
 
     await semesterRepo.setInactive(id);
+  }
+
+  async deleteSemester(id: number) {
+    const semester = await semesterRepo.findById(id);
+    if (!semester) {
+      throw new Error(`Semester dengan ID ${id} tidak ditemukan.`);
+    }
+
+    if (semester.isActive) {
+      throw new Error('Semester aktif tidak dapat dihapus. Aktifkan semester lain terlebih dahulu.');
+    }
+
+    const [att, ag] = await Promise.all([
+      db.select({ id: attendances.id }).from(attendances).where(eq(attendances.semesterId, id)).limit(1),
+      db.select({ id: teacherAgendas.id }).from(teacherAgendas).where(eq(teacherAgendas.semesterId, id)).limit(1),
+    ]);
+
+    if (att.length > 0 || ag.length > 0) {
+      const parts: string[] = [];
+      if (att.length > 0) parts.push('Data Presensi');
+      if (ag.length > 0) parts.push('Agenda Guru');
+      throw new Error(`Semester tidak bisa dihapus karena masih dipakai oleh: ${parts.join(', ')}. Hapus atau pindahkan data tersebut terlebih dahulu.`);
+    }
+
+    await semesterRepo.delete(id);
   }
 }
 export const semesterService = new SemesterService();

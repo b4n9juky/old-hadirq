@@ -100,9 +100,10 @@ export class AgendaAttendanceService {
     await db.delete(teacherAgendas).where(eq(teacherAgendas.id, agendaId));
   }
 
-  async getForm(agendaId: number) {
+  async getForm(teacherId: string, agendaId: number) {
     const agenda = await db.select({
       id: teacherAgendas.id,
+      teacherId: teacherAgendas.teacherId,
       classId: teacherAgendas.classId,
       className: classes.name,
       title: teacherAgendas.title,
@@ -119,6 +120,7 @@ export class AgendaAttendanceService {
     .limit(1);
 
     if (agenda.length === 0) throw new Error('Agenda tidak ditemukan.');
+    if (agenda[0].teacherId !== teacherId) throw new Error('Anda tidak memiliki akses ke agenda ini.');
 
     let studentsRows: { studentId: number; nis: string; studentName: string }[] = [];
     if (agenda[0].classId) {
@@ -159,9 +161,17 @@ export class AgendaAttendanceService {
   }
 
   async submitAttendance(
+    teacherId: string,
     agendaId: number,
     entries: { studentId: number; status: string; notes?: string }[],
   ) {
+    const ownership = await db.select({ id: teacherAgendas.id, teacherId: teacherAgendas.teacherId })
+      .from(teacherAgendas)
+      .where(eq(teacherAgendas.id, agendaId))
+      .limit(1);
+    if (ownership.length === 0) throw new Error('Agenda tidak ditemukan.');
+    if (ownership[0].teacherId !== teacherId) throw new Error('Anda tidak memiliki akses ke agenda ini.');
+
     const validStatuses = ['PRESENT', 'SICK', 'EXCUSED', 'ABSENT', 'DISPEN'];
 
     for (const entry of entries) {

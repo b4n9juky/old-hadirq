@@ -74,10 +74,11 @@ agendaAttendanceRouter.delete('/agendas/:id', authMiddleware, requireRole(['guru
 
 agendaAttendanceRouter.get('/agendas/:id/students', authMiddleware, requireRole(['guru']), async (req, res) => {
   try {
+    const teacherId = req.context!.user.id;
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ success: false, error: 'ID agenda tidak valid.' });
 
-    const result = await agendaAttendanceService.getForm(id);
+    const result = await agendaAttendanceService.getForm(teacherId, id);
     res.json({ success: true, data: result });
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });
@@ -86,6 +87,7 @@ agendaAttendanceRouter.get('/agendas/:id/students', authMiddleware, requireRole(
 
 agendaAttendanceRouter.post('/agendas/:id/attendance', authMiddleware, requireRole(['guru']), async (req, res) => {
   try {
+    const teacherId = req.context!.user.id;
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ success: false, error: 'ID agenda tidak valid.' });
 
@@ -94,7 +96,7 @@ agendaAttendanceRouter.post('/agendas/:id/attendance', authMiddleware, requireRo
       return res.status(400).json({ success: false, error: 'Data entries tidak valid.' });
     }
 
-    const result = await agendaAttendanceService.submitAttendance(id, entries);
+    const result = await agendaAttendanceService.submitAttendance(teacherId, id, entries);
     res.json(result);
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });

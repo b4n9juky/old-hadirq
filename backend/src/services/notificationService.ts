@@ -2,6 +2,7 @@ import { db } from '../db/index.js';
 import { notifications, user, students } from '../db/schema.js';
 import { eq, and, gte, lte, desc, count, sql } from 'drizzle-orm';
 import { waService } from './waService.js';
+import { settingService } from './settingService.js';
 import { formatTimeWIB, formatDateWIB, getSchoolDate } from '../lib/timezone.js';
 
 interface StudentInfo {
@@ -10,6 +11,21 @@ interface StudentInfo {
   nis: string;
   parentId: string | null;
 }
+
+const DEFAULT_TEMPLATES = {
+  wa_checkin_normal: `Assalamu'alaikum Wr. Wb.
+
+Ananda *{nama}* telah tiba di sekolah pada *{waktu}*.
+Terima kasih.`,
+  wa_checkin_late: `Assalamu'alaikum Wr. Wb.
+
+Ananda *{nama}* telah tiba di sekolah pada *{waktu}* (Terlambat).
+Terima kasih.`,
+  wa_checkout: `Assalamu'alaikum Wr. Wb.
+
+Ananda *{nama}* telah pulang pada pukul *{waktu}*.
+Terima kasih.`,
+};
 
 class NotificationService {
   private formatTime(date: Date | string | null | undefined): string {
@@ -33,6 +49,28 @@ class NotificationService {
       ABSENT: 'Alfa',
     };
     return labels[status] || status;
+  }
+
+  private async getTemplate(key: keyof typeof DEFAULT_TEMPLATES): Promise<string> {
+    const value = await settingService.getValue(key);
+    if (value && value.trim() !== '') return value;
+    return DEFAULT_TEMPLATES[key];
+  }
+
+  private replacePlaceholders(template: string, vars: Record<string, string>): string {
+    let result = template;
+    for (const [key, value] of Object.entries(vars)) {
+      result = result.replace(new RegExp(`\\{${key}\\}`, 'g'), value);
+    }
+    return result;
+  }
+
+  static getDefaultTemplates() {
+    return DEFAULT_TEMPLATES;
+  }
+
+  getDefaultTemplates() {
+    return DEFAULT_TEMPLATES;
   }
 
   async sendCheckInNotification(
@@ -62,9 +100,15 @@ class NotificationService {
     const dateStr = this.formatDate(checkinTime);
     const statusLabel = this.getStatusLabel(status);
 
-    const message = status === 'LATE'
-      ? `Assalamu'alaikum Wr. Wb.\n\nAnanda *${student.name}* telah tiba di sekolah pada *${timeStr}* (Terlambat).\nTerima kasih.`
-      : `Assalamu'alaikum Wr. Wb.\n\nAnanda *${student.name}* telah tiba di sekolah pada *${timeStr}*.\nTerima kasih.`;
+    const templateKey = status === 'LATE' ? 'wa_checkin_late' : 'wa_checkin_normal';
+    const template = await this.getTemplate(templateKey);
+    const message = this.replacePlaceholders(template, {
+      nama: student.name,
+      waktu: timeStr,
+      tanggal: dateStr,
+      status: statusLabel,
+      kelas: '',
+    });
 
     console.log(`[WA] Sending check-in to ${phone} for ${student.name}...`);
     const result = await waService.sendMessageSafe(phone, message);
@@ -105,7 +149,14 @@ class NotificationService {
     const phone = parent[0].phone;
     const timeStr = this.formatTime(checkoutTime);
 
-    const message = `Assalamu'alaikum Wr. Wb.\n\nAnanda *${student.name}* telah pulang pada pukul *${timeStr}*.\nTerima kasih.`;
+    const template = await this.getTemplate('wa_checkout');
+    const message = this.replacePlaceholders(template, {
+      nama: student.name,
+      waktu: timeStr,
+      tanggal: '',
+      status: '',
+      kelas: '',
+    });
 
     console.log(`[WA] Sending check-out to ${phone} for ${student.name}...`);
     const result = await waService.sendMessageSafe(phone, message);

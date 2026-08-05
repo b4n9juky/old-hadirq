@@ -153,7 +153,8 @@ export const TeacherAttendanceSection: React.FC<Props> = ({ token }) => {
 
   const handleExportPdf = async () => {
     const { default: jsPDF } = await import('jspdf');
-    await import('jspdf-autotable');
+    const autoTableMod: any = await import('jspdf-autotable');
+    const autoTable = autoTableMod.autoTable || autoTableMod.default;
     const doc = new jsPDF('l', 'mm', 'a4');
     const pageWidth = doc.internal.pageSize.getWidth();
 
@@ -164,7 +165,7 @@ export const TeacherAttendanceSection: React.FC<Props> = ({ token }) => {
     doc.setFont('helvetica', 'normal');
     doc.text(`Periode: ${new Date(filterDate).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' })}`, pageWidth / 2, 22, { align: 'center' });
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       startY: 28,
       head: [['Nama Guru', 'Tanggal', 'Jam Masuk', 'Jam Pulang', 'Status', 'Verifikasi']],
       body: records.map((r: any) => [

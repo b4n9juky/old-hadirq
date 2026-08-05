@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { settingService } from '../services/settingService.js';
+import { notificationService } from '../services/notificationService.js';
 import { getSchoolTimezone, setSchoolTimezone } from '../lib/timezone.js';
 
 export const settingsRouter = Router();
@@ -9,6 +10,16 @@ settingsRouter.get('/', async (req, res) => {
   try {
     const data = await settingService.getAll();
     res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET default WhatsApp templates
+settingsRouter.get('/templates/defaults', async (_req, res) => {
+  try {
+    const defaults = notificationService.getDefaultTemplates();
+    res.json({ success: true, data: defaults });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }

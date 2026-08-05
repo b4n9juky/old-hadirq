@@ -44,6 +44,34 @@ export class ParentService {
     return userRepo.searchByRole('parent', query);
   }
 
+  // Create or link a parent account for a given student. Reused by student import.
+  async upsertAndLinkParent(
+    studentId: number,
+    input: { name: string; email: string; password: string; phone?: string },
+  ): Promise<{ status: 'sukses' | 'ditautkan'; parentId: string }> {
+    const existingUser = await userRepo.findByEmail(input.email);
+    if (existingUser) {
+      await parentRepo.setParent(studentId, existingUser.id);
+      if (input.phone) {
+        await db.update(user).set({ phone: input.phone }).where(eq(user.id, existingUser.id));
+      }
+      return { status: 'ditautkan', parentId: existingUser.id };
+    }
+
+    const signupResult = await auth.api.signUpEmail({
+      body: { name: input.name, email: input.email, password: input.password },
+    });
+    const userId = signupResult.user.id;
+
+    await userRepo.updateRole(userId, 'parent');
+    if (input.phone) {
+      await db.update(user).set({ phone: input.phone }).where(eq(user.id, userId));
+    }
+
+    await parentRepo.setParent(studentId, userId);
+    return { status: 'sukses', parentId: userId };
+  }
+
   async getMyChildren(userId: string) {
     const children = await parentRepo.findStudentsByParentId(userId);
 

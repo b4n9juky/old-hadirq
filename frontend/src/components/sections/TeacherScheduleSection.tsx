@@ -5,6 +5,7 @@ import { ModalShell } from '../shared/ModalShell';
 import { FormSelect } from '../shared/FormField';
 import { TimePicker } from '../shared/TimePicker';
 import { useAttendanceSound } from '../../hooks/useAttendanceSound';
+import { DAY_LABELS } from '../../utils/days';
 
 interface ScheduleRecord {
   id: number;
@@ -38,10 +39,6 @@ interface JurnalScheduleInfo {
 }
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-const DAY_LABELS: Record<string, string> = {
-  Monday: 'Senin', Tuesday: 'Selasa', Wednesday: 'Rabu', Thursday: 'Kamis',
-  Friday: 'Jumat', Saturday: 'Sabtu', Sunday: 'Minggu',
-};
 
 const STATUS_LIST = ['PRESENT', 'SICK', 'EXCUSED', 'ABSENT'];
 const STATUS_LABELS: Record<string, string> = {

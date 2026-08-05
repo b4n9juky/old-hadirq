@@ -35,5 +35,9 @@ export class AcademicYearRepository {
   async setInactive(id: number) {
     await db.update(academicYears).set({ isActive: false }).where(eq(academicYears.id, id));
   }
+
+  async delete(id: number) {
+    await db.delete(academicYears).where(eq(academicYears.id, id));
+  }
 }
 export const academicYearRepo = new AcademicYearRepository();

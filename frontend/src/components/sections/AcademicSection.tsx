@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Pencil } from 'lucide-react';
+import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { ActiveBadge } from '../shared/StatusBadge';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { ModalShell } from '../shared/ModalShell';
 import { FormInput, FormSelect } from '../shared/FormField';
 import { TimePicker } from '../shared/TimePicker';
+import { dayLabel, DAY_ORDER } from '../../utils/days';
 
 interface YearRecord { id: number; name: string; isActive: boolean; }
 interface SemesterRecord { id: number; academicYearId: number; name: string; isActive: boolean; }
@@ -99,6 +100,16 @@ export const AcademicSection: React.FC<Props> = ({ token }) => {
     } catch (err: any) { setErrorMsg(err.message); }
   };
 
+  const handleDeleteYear = async (id: number) => {
+    if (!confirm('Hapus tahun ajaran ini? Tindakan ini tidak bisa dibatalkan.')) return;
+    try {
+      const res = await fetch(`/api/academic-years/${id}`, { method: 'DELETE', headers: authHeader });
+      const data = await res.json();
+      if (res.ok && data.success) { triggerToast('Tahun ajaran dihapus!'); fetchData(); }
+      else throw new Error(data.error || 'Gagal.');
+    } catch (err: any) { setErrorMsg(err.message); }
+  };
+
   const handleAddSemester = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -136,6 +147,16 @@ export const AcademicSection: React.FC<Props> = ({ token }) => {
       const res = await fetch(`/api/semesters/${id}/activate`, { method: 'PUT', headers: authHeader });
       const data = await res.json();
       if (res.ok && data.success) { triggerToast('Semester diaktifkan!'); fetchData(); }
+      else throw new Error(data.error || 'Gagal.');
+    } catch (err: any) { setErrorMsg(err.message); }
+  };
+
+  const handleDeleteSemester = async (id: number) => {
+    if (!confirm('Hapus semester ini? Tindakan ini tidak bisa dibatalkan.')) return;
+    try {
+      const res = await fetch(`/api/semesters/${id}`, { method: 'DELETE', headers: authHeader });
+      const data = await res.json();
+      if (res.ok && data.success) { triggerToast('Semester dihapus!'); fetchData(); }
       else throw new Error(data.error || 'Gagal.');
     } catch (err: any) { setErrorMsg(err.message); }
   };
@@ -198,6 +219,11 @@ export const AcademicSection: React.FC<Props> = ({ token }) => {
                       className="p-1.5 rounded-lg bg-secondary hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
                       <Pencil className="w-3 h-3" />
                     </button>
+                    <button onClick={() => handleDeleteYear(year.id)} disabled={year.isActive}
+                      className="p-1.5 rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive border border-destructive/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      title={year.isActive ? 'Nonaktifkan tahun ajaran terlebih dahulu' : 'Hapus tahun ajaran'}>
+                      <Trash2 className="w-3 h-3" />
+                    </button>
                     {year.isActive ? (
                       <button onClick={() => handleDeactivateYear(year.id)}
                         className="px-2.5 py-1 rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive border border-destructive/30 text-xs font-semibold transition-colors">
@@ -240,6 +266,11 @@ export const AcademicSection: React.FC<Props> = ({ token }) => {
                       className="p-1.5 rounded-lg bg-secondary hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
                       <Pencil className="w-3 h-3" />
                     </button>
+                    <button onClick={() => handleDeleteSemester(sem.id)} disabled={sem.isActive}
+                      className="p-1.5 rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive border border-destructive/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      title={sem.isActive ? 'Nonaktifkan semester terlebih dahulu' : 'Hapus semester'}>
+                      <Trash2 className="w-3 h-3" />
+                    </button>
                     {sem.isActive ? (
                       <button onClick={() => handleDeactivateSemester(sem.id)}
                         className="px-2.5 py-1 rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive border border-destructive/30 text-xs font-semibold transition-colors">
@@ -268,11 +299,11 @@ export const AcademicSection: React.FC<Props> = ({ token }) => {
         {listLoading ? <LoadingSpinner /> : (
           <div className="space-y-2">
             {schedulesList.length === 0 && <p className="text-muted-foreground text-xs">Belum ada data.</p>}
-            {schedulesList.map((sched) => (
+            {[...schedulesList].sort((a, b) => DAY_ORDER.indexOf(a.dayName) - DAY_ORDER.indexOf(b.dayName)).map((sched) => (
               <div key={sched.id} className={`p-4 rounded-xl border flex justify-between items-center gap-4 ${sched.isActive ? 'bg-card/50 border-border' : 'bg-muted/30 border-muted-foreground/20 opacity-60'}`}>
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-foreground text-sm">{sched.dayName}</span>
+                    <span className="font-bold text-foreground text-sm">{dayLabel(sched.dayName)}</span>
                     {!sched.isActive && <span className="text-xs px-1.5 py-0.5 rounded bg-muted-foreground/20 text-muted-foreground">Nonaktif</span>}
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">
@@ -355,7 +386,7 @@ export const AcademicSection: React.FC<Props> = ({ token }) => {
           footer={<><button type="button" onClick={() => setShowEditSchedule(null)} className="px-4 py-2 rounded-xl border border-border text-muted-foreground font-bold hover:text-foreground text-xs">Batal</button><button type="submit" form="editSchedForm" className="px-4 py-2 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs">Simpan Perubahan</button></>}>
           <form id="editSchedForm" onSubmit={handleEditSchedule}>
             <div className="space-y-4">
-              <p className="text-primary font-semibold">{showEditSchedule.dayName}</p>
+              <p className="text-primary font-semibold">{dayLabel(showEditSchedule.dayName)}</p>
               <TimePicker label="Jam Mulai Absen" value={schedStart} onChange={setSchedStart} required />
               <TimePicker label="Batas Toleransi Terlambat" value={schedLate} onChange={setSchedLate} required />
               <TimePicker label="Jam Pulang (Checkout)" value={schedCheckout} onChange={setSchedCheckout} required />

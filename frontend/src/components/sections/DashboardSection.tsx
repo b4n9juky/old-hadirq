@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Users, CheckCircle, Clock, UserMinus, SlidersHorizontal, FileSpreadsheet, FileDown, User, MapPin, Eye, Trash2, Calendar, Camera, BookOpen, ClipboardCheck, ScanBarcode } from 'lucide-react';
+import { Users, CheckCircle, Clock, UserMinus, SlidersHorizontal, FileSpreadsheet, FileDown, User, Eye, Trash2, Calendar, Camera, BookOpen, ClipboardCheck, ScanBarcode } from 'lucide-react';
 import { ModalShell } from '../shared/ModalShell';
 import { DataTable } from '../shared/DataTable';
 import { useTimezone } from '../../hooks/useTimezone';
+import { agendaTypeLabel } from '../../constants/labels';
 
 interface Props {
   token: string;
@@ -66,29 +67,18 @@ export const DashboardSection: React.FC<Props> = ({ token, user }) => {
       align: 'center' as const,
       render: (row: any) => {
         const status = row.status;
-        const isVerified = !!row.isVerified;
         switch (status) {
           case 'PRESENT':
             return (
-              <div className="flex flex-col gap-1 items-center justify-center">
-                <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-bold border bg-emerald-500/10 border-emerald-500/20 text-emerald-500">
-                  TEPAT WAKTU
-                </span>
-                <span className={`inline-flex px-2 py-0.5 rounded-full text-2xs font-semibold border ${isVerified ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600' : 'bg-amber-500/10 border-amber-500/20 text-amber-600'}`}>
-                  {isVerified ? 'Terverifikasi' : 'Belum Diverifikasi'}
-                </span>
-              </div>
+              <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-bold border bg-emerald-500/10 border-emerald-500/20 text-emerald-500">
+                TEPAT WAKTU
+              </span>
             );
           case 'LATE':
             return (
-              <div className="flex flex-col gap-1 items-center justify-center">
-                <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-bold border bg-amber-500/10 border-amber-500/20 text-amber-500">
-                  TERLAMBAT
-                </span>
-                <span className={`inline-flex px-2 py-0.5 rounded-full text-2xs font-semibold border ${isVerified ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600' : 'bg-amber-500/10 border-amber-500/20 text-amber-600'}`}>
-                  {isVerified ? 'Terverifikasi' : 'Belum Diverifikasi'}
-                </span>
-              </div>
+              <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-bold border bg-amber-500/10 border-amber-500/20 text-amber-500">
+                TERLAMBAT
+              </span>
             );
           case 'SICK':
             return (
@@ -137,19 +127,6 @@ export const DashboardSection: React.FC<Props> = ({ token, user }) => {
             <div className="text-2xs text-muted-foreground mt-0.5">Checkout Selesai</div>
           </div>
         ) : <span className="text-xs text-muted-foreground/60 italic">Belum Pulang</span>
-      )
-    },
-    {
-      key: 'distance',
-      header: 'Akurasi & Jarak',
-      render: (row: any) => (
-        <>
-          <div className="flex items-center gap-1 text-foreground/80">
-            <MapPin className="w-3 h-3 text-muted-foreground" />
-            <span>Jarak: <span className="font-semibold text-foreground">{row.distance?.toFixed(1) || '-'}m</span></span>
-          </div>
-          <div className="text-2xs text-muted-foreground mt-0.5">Akurasi GPS: {row.accuracy?.toFixed(1) || '-'}m</div>
-        </>
       )
     },
     {
@@ -353,7 +330,7 @@ export const DashboardSection: React.FC<Props> = ({ token, user }) => {
       const total = a.totalStudents || 1;
       const attended = a.presentCount + a.sickCount + a.excusedCount + a.dispensationCount;
       const pct = Math.round((attended / total) * 100);
-      rows.push(`${reportStartDate},${a.className},${a.agendaType || 'Agenda'},"${a.title}",,,,,${total},${pct}%`);
+      rows.push(`${reportStartDate},${a.className},${agendaTypeLabel(a.agendaType) || 'Agenda'},"${a.title}",,,,,${total},${pct}%`);
     });
     downloadCsv(rows.join('\n'), `rekap-mengajar-${new Date().toISOString().slice(0, 10)}.csv`);
   };
@@ -607,7 +584,7 @@ export const DashboardSection: React.FC<Props> = ({ token, user }) => {
                               <div className="text-xs text-muted-foreground mt-0.5">{ag.className}</div>
                             </div>
                             {ag.agendaType && (
-                              <span className="text-2xs px-2 py-0.5 rounded-full bg-secondary text-muted-foreground font-semibold shrink-0">{ag.agendaType}</span>
+                              <span className="text-2xs px-2 py-0.5 rounded-full bg-secondary text-muted-foreground font-semibold shrink-0">{agendaTypeLabel(ag.agendaType)}</span>
                             )}
                           </div>
                           <div className="flex gap-1.5 text-xs flex-wrap">
@@ -802,11 +779,8 @@ export const DashboardSection: React.FC<Props> = ({ token, user }) => {
                        previewDetails.status === 'SICK' ? 'SAKIT' :
                        previewDetails.status === 'EXCUSED' ? 'IZIN' :
                        previewDetails.status === 'ABSENT' ? 'ALFA' :
-                       previewDetails.status}
-                      {(previewDetails.status === 'PRESENT' || previewDetails.status === 'LATE') && 
-                        ` (${previewDetails.isVerified ? 'Terverifikasi' : 'Belum Diverifikasi'})`
-                      }
-                    </span>
+                        previewDetails.status}
+                     </span>
                   </div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Jam Masuk</span><span className="text-foreground">{formatTimeString(previewDetails.checkinTime)}</span></div>
                   {previewDetails.checkoutTime && (

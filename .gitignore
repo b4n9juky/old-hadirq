@@ -15,7 +15,10 @@
 .cxx
 local.properties
 .env
-.env.*
+.env.local
+.env.*.local
+!.env.example
+!.env.example.*
 /app/build
 *.apk
 *.aab
@@ -54,6 +57,9 @@ debug.keystore
 /backend/*.log
 /backend/*.cjs
 /backend/*.mjs
+/backend/.wwebjs_cache/
+*.tsbuildinfo
+/backend/npm_install_log.txt
 
 # AI & Workspace Metadata
 /absensilocation.code-workspace
@@ -68,8 +74,8 @@ plan.md
 deploy.sh
 Hadirq_IOs.md
 
-# MySQL Data Directory
-/mysql/
+# MySQL Data Directory (keep init scripts, ignore only the data volume)
+/mysql/data/
 
 # SSL Certificates
 /certs/

@@ -7,6 +7,12 @@ import { getDistance } from 'geolib';
 import { notificationService } from './notificationService.js';
 
 export class KioskService {
+  async getKioskConfig() {
+    const val = await settingService.getValue('kiosk_camera_count');
+    const count = val !== null && !isNaN(parseInt(val)) ? parseInt(val) : 1;
+    return { cameraCount: Math.min(Math.max(count, 1), 4) };
+  }
+
   async processKioskAttendance(
     studentId: number,
     status?: 'PRESENT' | 'LATE' | 'SICK' | 'EXCUSED' | 'ABSENT',

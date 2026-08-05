@@ -1,6 +1,7 @@
 import { studentRepo } from '../repositories/studentRepository.js';
 import { userRepo } from '../repositories/userRepository.js';
 import { classRepo } from '../repositories/classRepository.js';
+import { parentService } from './parentService.js';
 import { generateQrCode, deleteQrCodeFile } from '../lib/qrGenerator.js';
 import { db } from '../db/index.js';
 import { students, user, attendances, subjectAttendances, agendaAttendances } from '../db/schema.js';
@@ -289,7 +290,32 @@ export class StudentService {
           console.error(`[QR] Gagal generate QR untuk NIS ${row.nis}:`, err);
         }
 
-        results.push({ row: rowNum, nis: row.nis, status: 'imported' });
+        const result: { row: number; nis: string; status: string; parentStatus?: string; parentError?: string } = {
+          row: rowNum,
+          nis: row.nis,
+          status: 'imported',
+        };
+
+        if (row.parentEmail && row.parentName) {
+          try {
+            const parentPassword = row.parentPassword && row.parentPassword.length > 0
+              ? row.parentPassword
+              : `${row.nis}HadirQ`;
+            const pres = await parentService.upsertAndLinkParent(studentId, {
+              name: row.parentName,
+              email: row.parentEmail,
+              password: parentPassword,
+              phone: row.parentPhone,
+            });
+            result.parentStatus = pres.status;
+          } catch (err: any) {
+            console.error(`[Import] Row ${rowNum}: gagal membuat orang tua:`, err.message);
+            result.parentStatus = 'gagal';
+            result.parentError = err.message;
+          }
+        }
+
+        results.push(result);
         imported++;
       } catch (err: any) {
         const cause = err.cause || err;

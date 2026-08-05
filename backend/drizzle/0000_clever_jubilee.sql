@@ -221,7 +221,7 @@ ALTER TABLE `attendances` ADD CONSTRAINT `attendances_semester_id_semesters_id_f
 ALTER TABLE `semesters` ADD CONSTRAINT `semesters_academic_year_id_academic_years_id_fk` FOREIGN KEY (`academic_year_id`) REFERENCES `academic_years`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `session` ADD CONSTRAINT `session_user_id_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `students` ADD CONSTRAINT `students_class_id_classes_id_fk` FOREIGN KEY (`class_id`) REFERENCES `classes`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `subject_attendances` ADD CONSTRAINT `subject_attendances_teaching_schedule_id_teaching_schedules_id_fk` FOREIGN KEY (`teaching_schedule_id`) REFERENCES `teaching_schedules`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `subject_attendances` ADD CONSTRAINT `sa_tsched_fk` FOREIGN KEY (`teaching_schedule_id`) REFERENCES `teaching_schedules`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `subject_attendances` ADD CONSTRAINT `subject_attendances_student_id_students_id_fk` FOREIGN KEY (`student_id`) REFERENCES `students`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `teacher_agendas` ADD CONSTRAINT `teacher_agendas_teacher_id_user_id_fk` FOREIGN KEY (`teacher_id`) REFERENCES `user`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `teacher_agendas` ADD CONSTRAINT `teacher_agendas_class_id_classes_id_fk` FOREIGN KEY (`class_id`) REFERENCES `classes`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -229,4 +229,4 @@ ALTER TABLE `teacher_agendas` ADD CONSTRAINT `teacher_agendas_academic_year_id_a
 ALTER TABLE `teacher_agendas` ADD CONSTRAINT `teacher_agendas_semester_id_semesters_id_fk` FOREIGN KEY (`semester_id`) REFERENCES `semesters`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `teaching_schedules` ADD CONSTRAINT `teaching_schedules_teacher_id_user_id_fk` FOREIGN KEY (`teacher_id`) REFERENCES `user`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `teaching_schedules` ADD CONSTRAINT `teaching_schedules_class_id_classes_id_fk` FOREIGN KEY (`class_id`) REFERENCES `classes`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `teaching_session_logs` ADD CONSTRAINT `teaching_session_logs_teaching_schedule_id_teaching_schedules_id_fk` FOREIGN KEY (`teaching_schedule_id`) REFERENCES `teaching_schedules`(`id`) ON DELETE no action ON UPDATE no action;
+ALTER TABLE `teaching_session_logs` ADD CONSTRAINT `tsl_tsched_fk` FOREIGN KEY (`teaching_schedule_id`) REFERENCES `teaching_schedules`(`id`) ON DELETE no action ON UPDATE no action;

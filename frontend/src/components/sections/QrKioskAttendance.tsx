@@ -3,7 +3,7 @@ import { Html5Qrcode } from 'html5-qrcode';
 import { ScanBarcode, CheckCircle2, UserCircle, Maximize2, Minimize2, Clock, RefreshCw } from 'lucide-react';
 import { useAttendanceSound } from '../../hooks/useAttendanceSound';
 import { useTimezone } from '../../hooks/useTimezone';
-import { getVideoDevices, getDefaultDeviceId } from '../../utils/camera';
+import { getVideoDevices, pickCameraDevices, getCameraGridClass, loadKioskCameraCount } from '../../utils/camera';
 
 interface RecentArrival {
   id: number;
@@ -16,9 +16,35 @@ interface RecentArrival {
   checkinTime: string;
 }
 
+interface ActivityItem {
+  id: number;
+  name: string;
+  isSuccess: boolean;
+  message: string;
+  photo?: string | null;
+}
+
+interface BulkCheckinResult {
+  success: boolean;
+  message: string;
+  studentId?: number;
+  studentNis?: string;
+  studentName?: string;
+  studentPhoto?: string | null;
+}
+
+const QR_COOLDOWN_MS = 3000;
+const FLUSH_MS = 300;
+const GPS_MAX_AGE_MS = 60000;
+
 export const QrKioskAttendance = () => {
-  const qrScannerRef = useRef<Html5Qrcode | null>(null);
-  const isProcessingRef = useRef(false);
+  const qrScannersRef = useRef<Array<Html5Qrcode | null>>([]);
+  const cooldownRef = useRef<Map<string, number>>(new Map());
+  const gpsRef = useRef<{ lat?: number; lng?: number; acc?: number; time: number }>({ time: 0 });
+  const pendingRef = useRef<Set<string>>(new Set());
+  const flushTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const activityIdRef = useRef(0);
+  const lastSoundRef = useRef(0);
 
   const { playAttendanceSound } = useAttendanceSound();
   const schoolTimezone = useTimezone();
@@ -30,13 +56,11 @@ export const QrKioskAttendance = () => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [recentArrivals, setRecentArrivals] = useState<RecentArrival[]>([]);
 
-  const [qrActive, setQrActive] = useState(false);
+  const [activeCameras, setActiveCameras] = useState<string[]>([]);
+  const [activeScanners, setActiveScanners] = useState(0);
+  const [activityQueue, setActivityQueue] = useState<ActivityItem[]>([]);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [matchResult, setMatchResult] = useState<{ name: string; isSuccess: boolean; message: string; photo?: string } | null>(null);
   const [statusMsg, setStatusMsg] = useState('Memuat sistem QR kiosk...');
-  const [qrCameraDevices, setQrCameraDevices] = useState<MediaDeviceInfo[]>([]);
-  const [qrSelectedDeviceId, setQrSelectedDeviceId] = useState<string | undefined>(undefined);
-  const [qrShowCameraPicker, setQrShowCameraPicker] = useState(false);
 
   useEffect(() => {
     const handleFullscreenChange = () => setIsFullscreen(!!document.fullscreenElement);
@@ -68,110 +92,156 @@ export const QrKioskAttendance = () => {
     } catch { /* ignore */ }
   }, [kioskKey]);
 
-  const processQrCheckin = useCallback(async (nis: string) => {
-    if (!kioskKey || isProcessingRef.current) return;
-    isProcessingRef.current = true;
-    try {
-      let lat: number | undefined, lng: number | undefined, acc: number | undefined;
-      try {
-        const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
-        });
-        lat = pos.coords.latitude;
-        lng = pos.coords.longitude;
-        acc = pos.coords.accuracy;
-      } catch {
-        /* GPS unavailable — proceed without location */
-      }
+  const pushActivity = useCallback((item: Omit<ActivityItem, 'id'>) => {
+    const id = ++activityIdRef.current;
+    setActivityQueue(q => [...q.slice(-4), { ...item, id }]);
+    setTimeout(() => {
+      setActivityQueue(q => q.filter(a => a.id !== id));
+    }, 4500);
+  }, []);
 
-      const res = await fetch('/api/kiosk/checkin', {
+  const getGps = useCallback(async (): Promise<{ lat?: number; lng?: number; acc?: number }> => {
+    const now = Date.now();
+    if (gpsRef.current.lat !== undefined && now - gpsRef.current.time < GPS_MAX_AGE_MS) {
+      return { lat: gpsRef.current.lat, lng: gpsRef.current.lng, acc: gpsRef.current.acc };
+    }
+    try {
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
+      });
+      gpsRef.current = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy, time: now };
+      return { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy };
+    } catch {
+      return { lat: gpsRef.current.lat, lng: gpsRef.current.lng, acc: gpsRef.current.acc };
+    }
+  }, []);
+
+  const checkinBatch = useCallback(async (nises: string[]) => {
+    if (!kioskKey || nises.length === 0) return;
+    const gps = await getGps();
+    try {
+      const res = await fetch('/api/kiosk/checkin-bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-kiosk-token': kioskKey },
-        body: JSON.stringify({ studentNis: nis, latitude: lat, longitude: lng, accuracy: acc })
+        body: JSON.stringify({
+          entries: nises.map(n => ({ studentNis: n, latitude: gps.lat, longitude: gps.lng, accuracy: gps.acc }))
+        })
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setMatchResult({ name: data.data.studentName || nis, isSuccess: true, message: data.message, photo: data.data.studentPhoto });
-        playAttendanceSound(true, data.message);
-        fetchRecentArrivals();
-      } else {
-        setMatchResult({ name: nis, isSuccess: false, message: data.error || 'Gagal check-in', photo: undefined });
-        playAttendanceSound(false, data.error || 'Gagal check-in');
+      const data = await res.json() as { success: boolean; successCount?: number; results?: BulkCheckinResult[] };
+      if (data.success && Array.isArray(data.results)) {
+        let played = false;
+        for (const r of data.results) {
+          pushActivity({
+            name: r.studentName || r.studentNis || 'Siswa',
+            isSuccess: !!r.success,
+            message: r.message,
+            photo: r.studentPhoto,
+          });
+          if (!played && Date.now() - lastSoundRef.current > 800) {
+            playAttendanceSound(!!r.success, r.message);
+            lastSoundRef.current = Date.now();
+            played = true;
+          }
+        }
+        if (data.results.some(r => r.success)) fetchRecentArrivals();
       }
     } catch {
-      setMatchResult({ name: nis, isSuccess: false, message: 'Kesalahan jaringan', photo: undefined });
-      playAttendanceSound(false, 'Kesalahan jaringan');
+      pushActivity({ name: 'Jaringan', isSuccess: false, message: 'Kesalahan jaringan.' });
     }
-    setTimeout(() => { setMatchResult(null); isProcessingRef.current = false; }, 4000);
-  }, [kioskKey, fetchRecentArrivals, playAttendanceSound]);
+  }, [kioskKey, getGps, pushActivity, playAttendanceSound, fetchRecentArrivals]);
 
-  const startQrScanner = useCallback(async (deviceId?: string) => {
-    if (!qrScannerRef.current) {
-      qrScannerRef.current = new Html5Qrcode('qr-kiosk-scanner');
+  const tryAcquire = useCallback((text: string): boolean => {
+    const now = Date.now();
+    const last = cooldownRef.current.get(text) ?? 0;
+    if (now - last < QR_COOLDOWN_MS) return false;
+    cooldownRef.current.set(text, now);
+    return true;
+  }, []);
+
+  const scheduleFlush = useCallback(() => {
+    if (flushTimerRef.current) return;
+    flushTimerRef.current = setTimeout(() => {
+      flushTimerRef.current = null;
+      const nises = [...pendingRef.current];
+      pendingRef.current.clear();
+      if (nises.length > 0) checkinBatch(nises);
+    }, FLUSH_MS);
+  }, [checkinBatch]);
+
+  const handleDecode = useCallback((decodedText: string) => {
+    const text = decodedText.trim();
+    if (!text) return;
+    if (tryAcquire(text)) {
+      pendingRef.current.add(text);
+      scheduleFlush();
     }
-    if (qrScannerRef.current.isScanning) {
-      await qrScannerRef.current.stop().catch(() => {});
+  }, [tryAcquire, scheduleFlush]);
+
+  const stopAllQrScanners = useCallback(async () => {
+    const scanners = qrScannersRef.current;
+    qrScannersRef.current = [];
+    for (const s of scanners) {
+      if (!s) continue;
+      try { if (s.isScanning) await s.stop(); } catch { /* ignore */ }
+      try { s.clear(); } catch { /* ignore */ }
     }
+  }, []);
 
-    const config = deviceId ? deviceId : { facingMode: 'user' };
-
-    return qrScannerRef.current.start(
-      config,
-      { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 },
-      (decodedText: string) => {
-        if (!isProcessingRef.current) {
-          processQrCheckin(decodedText);
-        }
-      },
-      () => {}
-    );
-  }, [processQrCheckin]);
-
-  const switchQrCamera = useCallback(async (deviceId: string) => {
-    setQrSelectedDeviceId(deviceId);
-    setQrShowCameraPicker(false);
-    setStatusMsg('Mengganti kamera...');
+  const initScanners = useCallback(async () => {
+    if (!kioskKey) return;
+    setStatusMsg('Mengakses kamera...');
+    const devices = await getVideoDevices();
+    if (devices.length === 0) {
+      setActiveCameras([]);
+      setActiveScanners(0);
+      setStatusMsg('Kamera tidak ditemukan atau ditolak.');
+      return;
+    }
+    let desired = 1;
     try {
-      await startQrScanner(deviceId);
-      setQrActive(true);
-      setStatusMsg('Sistem siap. Arahkan QR Code ke kamera.');
-    } catch {
-      setQrActive(false);
-      setStatusMsg('Kamera tidak tersedia atau ditolak.');
-    }
-  }, [startQrScanner]);
+      desired = await loadKioskCameraCount(kioskKey);
+    } catch { /* ignore */ }
+    const ids = pickCameraDevices(devices, desired).map(d => d.deviceId);
+    setActiveCameras(ids);
 
-  // Initialize QR scanner
+    await stopAllQrScanners();
+    await new Promise(r => setTimeout(r, 100));
+
+    let started = 0;
+    for (let i = 0; i < ids.length; i++) {
+      const scanner = new Html5Qrcode(`qr-kiosk-scanner-${i}`);
+      qrScannersRef.current[i] = scanner;
+      try {
+        await scanner.start(
+          ids[i],
+          { fps: ids.length >= 3 ? 7 : 10, qrbox: { width: 220, height: 220 }, aspectRatio: 1.0 },
+          handleDecode,
+          () => {}
+        );
+        started++;
+      } catch {
+        qrScannersRef.current[i] = null;
+      }
+    }
+    setActiveScanners(started);
+    setStatusMsg(started > 1 ? `Sistem siap. ${started} kamera aktif. Arahkan QR Code ke kamera.` : 'Sistem siap. Arahkan QR Code ke kamera.');
+  }, [kioskKey, stopAllQrScanners, handleDecode]);
+
+  // Initialize QR scanners
   useEffect(() => {
     if (!kioskKey) return;
 
-    const init = async () => {
-      fetchRecentArrivals();
-      const devices = await getVideoDevices();
-      setQrCameraDevices(devices);
-      const defaultId = getDefaultDeviceId(devices);
-      setQrSelectedDeviceId(defaultId);
-
-      try {
-        await startQrScanner(defaultId);
-        setQrActive(true);
-        setStatusMsg('Sistem siap. Arahkan QR Code ke kamera.');
-      } catch {
-        setQrActive(false);
-        setStatusMsg('Kamera tidak tersedia atau ditolak.');
-      }
-    };
-    init();
+    fetchRecentArrivals();
+    initScanners();
 
     const arrivalInterval = setInterval(fetchRecentArrivals, 10000);
 
     return () => {
       clearInterval(arrivalInterval);
-      if (qrScannerRef.current?.isScanning) {
-        qrScannerRef.current.stop().then(() => qrScannerRef.current?.clear()).catch(() => {});
-      }
+      if (flushTimerRef.current) { clearTimeout(flushTimerRef.current); flushTimerRef.current = null; }
+      stopAllQrScanners();
     };
-  }, [kioskKey, fetchRecentArrivals, startQrScanner]);
+  }, [kioskKey, fetchRecentArrivals, initScanners, stopAllQrScanners]);
 
   // Auth screen
   if (!kioskKey) {
@@ -254,7 +324,7 @@ export const QrKioskAttendance = () => {
           </div>
           <div>
             <h1 className="text-lg font-bold text-white">Kiosk QR Code</h1>
-            <p className="text-xs text-zinc-500">Scan QR Code siswa untuk absensi</p>
+            <p className="text-xs text-zinc-500">Scan QR Code siswa · {activeScanners} kamera aktif</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -265,76 +335,64 @@ export const QrKioskAttendance = () => {
             </span>
           </div>
           <p className="text-sm text-zinc-400" role="status">{statusMsg}</p>
-          {qrCameraDevices.length > 1 && (
-            <div className="relative">
-              <button onClick={() => setQrShowCameraPicker(v => !v)}
-                className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-primary hover:text-primary/70 transition-colors"
-                title="Ganti Kamera" aria-label="Ganti Kamera">
-                <RefreshCw className="w-4 h-4" />
-              </button>
-              {qrShowCameraPicker && (
-                <div className="absolute right-0 top-full mt-2 w-64 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl z-50 overflow-hidden">
-                  {qrCameraDevices.map(d => (
-                    <button key={d.deviceId}
-                      onClick={() => switchQrCamera(d.deviceId)}
-                      className={`w-full text-left px-4 py-3 text-sm border-b border-zinc-800 last:border-b-0 transition-colors ${
-                        d.deviceId === qrSelectedDeviceId
-                          ? 'bg-primary/10 text-primary font-bold'
-                          : 'text-zinc-300 hover:bg-zinc-800'
-                      }`}>
-                      {d.label || `Kamera ${d.deviceId.slice(0, 8)}...`}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          <button onClick={() => initScanners()} className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-primary hover:text-primary/70 transition-colors" title="Perbarui Kamera" aria-label="Perbarui Kamera">
+            <RefreshCw className="w-4 h-4" />
+          </button>
           <button onClick={handleToggleFullscreen} className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-primary hover:text-primary/70 transition-colors" title="Layar Penuh" aria-label="Layar Penuh">
             {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </button>
         </div>
       </div>
 
-      {/* Main Content - Split Screen */}
+      {/* Main Content */}
       <div className="flex-1 flex min-h-0">
-        {/* Left Side - QR Scanner */}
-        <div className="w-1/2 relative bg-zinc-950 flex flex-col">
-          <div id="qr-kiosk-scanner" className="flex-1 relative overflow-hidden bg-black" />
-          {/* Scan area overlay */}
-          <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-            <div className="w-64 h-64 border-2 border-primary/40 rounded-xl" />
-          </div>
-          {/* Status badge */}
-          <div className="absolute bottom-4 left-4 z-20 flex items-center gap-2 px-3 py-2 rounded-xl bg-black/60 backdrop-blur-sm border border-zinc-800/50" role="status">
-            <div className={`w-2 h-2 rounded-full ${qrActive ? 'bg-primary animate-pulse' : 'bg-zinc-600'}`}></div>
-            <span className="text-xs text-zinc-400">{qrActive ? 'QR Scanner Aktif' : 'Menunggu Kamera...'}</span>
-          </div>
-
-          {/* Result Overlay */}
-          <div
-            className="absolute inset-0 z-30 flex items-center justify-center"
-            style={{ visibility: matchResult ? 'visible' : 'hidden', contain: 'strict' }}
-          >
-            <div className="w-full h-full flex items-center justify-center bg-black/80">
-              <div className={`p-8 rounded-3xl flex flex-col items-center text-center max-w-sm w-full mx-4 shadow-2xl transition-opacity duration-200 ${matchResult?.isSuccess ? 'bg-primary/40 border border-primary/50' : 'bg-destructive/40 border border-destructive/50'}`}
-                style={{ opacity: matchResult ? 1 : 0 }} role="alert">
-                {matchResult?.photo ? (
-                  <img src={matchResult.photo} alt={matchResult.name}
-                    className="w-24 h-24 rounded-full object-cover border-4 border-primary/50 shadow-lg mb-4" />
-                ) : matchResult?.isSuccess ? (
-                  <CheckCircle2 className="w-20 h-20 text-primary mb-4 drop-shadow-lg" />
-                ) : (
-                  <UserCircle className="w-20 h-20 text-destructive mb-4 drop-shadow-lg" />
-                )}
-                <h2 className="text-2xl font-bold mb-2 text-white">{matchResult?.name}</h2>
-                <p className="text-base text-gray-300">{matchResult?.message}</p>
-              </div>
+        {/* QR Scanner Feeds */}
+        <div className={`flex-1 min-w-0 relative bg-zinc-950 grid gap-1 ${getCameraGridClass(activeCameras.length)} min-h-0`}>
+          {activeCameras.length === 0 ? (
+            <div className="col-span-full flex flex-col items-center justify-center text-center p-6">
+              <ScanBarcode className="w-16 h-16 text-zinc-700 mb-4" />
+              <p className="text-zinc-500 text-sm font-medium">Kamera tidak ditemukan</p>
+              <p className="text-zinc-600 text-xs mt-1">Periksa koneksi kamera lalu tekan tombol perbarui.</p>
             </div>
+          ) : (
+            activeCameras.map((deviceId, i) => (
+              <div key={deviceId} className="relative min-h-0 overflow-hidden bg-black">
+                <div id={`qr-kiosk-scanner-${i}`} className="absolute inset-0" />
+                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                  <div className="w-52 h-52 border-2 border-primary/40 rounded-xl" />
+                </div>
+                <div className="absolute bottom-3 left-3 z-20 flex items-center gap-2 px-3 py-1.5 rounded-xl bg-black/60 backdrop-blur-sm border border-zinc-800/50" role="status">
+                  <div className={`w-2 h-2 rounded-full ${activeScanners > 0 ? 'bg-primary animate-pulse' : 'bg-zinc-600'}`}></div>
+                  <span className="text-xs text-zinc-400">QR {i + 1}</span>
+                </div>
+              </div>
+            ))
+          )}
+
+          {/* Activity Notifications */}
+          <div className="absolute top-4 right-4 z-40 w-80 space-y-2 pointer-events-none">
+            {activityQueue.map(a => (
+              <div key={a.id} className={`p-4 rounded-2xl border shadow-2xl backdrop-blur-sm ${a.isSuccess ? 'bg-primary/40 border-primary/50' : 'bg-destructive/40 border-destructive/50'}`} role="alert">
+                <div className="flex items-center gap-3">
+                  {a.photo ? (
+                    <img src={a.photo} alt={a.name} className="w-12 h-12 rounded-full object-cover border-2 border-white/20 flex-shrink-0" />
+                  ) : a.isSuccess ? (
+                    <CheckCircle2 className="w-12 h-12 text-primary flex-shrink-0" />
+                  ) : (
+                    <UserCircle className="w-12 h-12 text-destructive flex-shrink-0" />
+                  )}
+                  <div className="min-w-0">
+                    <h3 className="text-base font-bold text-white truncate">{a.name}</h3>
+                    <p className="text-xs text-gray-300 leading-snug">{a.message}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 
         {/* Right Side - Recent Arrivals */}
-        <div className="w-1/2 flex flex-col bg-zinc-900/50 border-l border-zinc-800/50">
+        <div className="w-80 flex-none flex flex-col bg-zinc-900/50 border-l border-zinc-800/50">
           <div className="flex-shrink-0 px-6 py-4 border-b border-zinc-800/50">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
