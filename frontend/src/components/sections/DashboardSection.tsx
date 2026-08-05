@@ -190,6 +190,7 @@ export const DashboardSection: React.FC<Props> = ({ token, user }) => {
       if (!res.ok) throw new Error(result.error || 'Gagal mengambil data laporan.');
       return Array.isArray(result.data) ? result.data : [];
     },
+    refetchInterval: 5000,
   });
   const reports = reportsData || [];
 
@@ -730,7 +731,16 @@ export const DashboardSection: React.FC<Props> = ({ token, user }) => {
           <section className="bg-card border border-border rounded-2xl overflow-hidden shadow-xl">
             <div className="px-6 py-5 border-b border-border flex justify-between items-center gap-4">
               <div>
-                <h2 className="text-base font-bold text-foreground">Log Riwayat Kehadiran Siswa</h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold text-foreground">Log Riwayat Kehadiran Siswa</h2>
+                  <span className="flex items-center gap-1.5 text-[10px] font-semibold text-emerald-500">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    </span>
+                    Live
+                  </span>
+                </div>
                 <p className="text-xs text-muted-foreground mt-1">Ditemukan {reports.length} rekaman absensi cocok.</p>
               </div>
               <button onClick={handleExportCsv}
