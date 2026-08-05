@@ -76,12 +76,16 @@ class NotificationService {
 
   private async sendPushFallback(
     parentId: string,
+    studentId: number,
     studentName: string,
     type: 'CHECKIN' | 'CHECKOUT',
     timeStr: string,
     statusLabel?: string,
   ) {
-    if (!pushService.isConfigured()) return;
+    if (!pushService.isConfigured()) {
+      console.log(`[Push] VAPID not configured, skipping push for ${studentName}`);
+      return;
+    }
 
     const typeLabel = type === 'CHECKIN' ? 'Check-in' : 'Check-out';
     let body: string;
@@ -93,23 +97,16 @@ class NotificationService {
       body = `${studentName} telah pulang pada pukul ${timeStr}.`;
     }
 
-    const pushResult = await pushService.sendPushNotification(parentId, {
-      title: `HadirQ - ${typeLabel}`,
-      body,
-      url: '/dashboard/orang-tua',
-    });
-
-    if (pushResult.sent > 0) {
-      console.log(`[Push] ${typeLabel} sent to parent (${pushResult.sent} device(s))`);
-      await db.insert(notifications).values({
-        studentId: 0,
-        type,
-        channel: 'webpush',
-        recipient: parentId,
-        message: body,
-        status: 'SENT',
-        sentAt: getSchoolDate(),
+    try {
+      const pushResult = await pushService.sendPushNotification(parentId, {
+        title: `HadirQ - ${typeLabel}`,
+        body,
+        url: '/dashboard/orang-tua',
       });
+
+      console.log(`[Push] ${typeLabel} for ${studentName}: sent=${pushResult.sent} failed=${pushResult.failed}`);
+    } catch (err: any) {
+      console.error(`[Push] Error sending push for ${studentName}:`, err.message);
     }
   }
 
@@ -167,7 +164,7 @@ class NotificationService {
 
     if (!result.success) {
       console.log(`[Push] WA failed for ${student.name}, trying push fallback...`);
-      this.sendPushFallback(student.parentId!, student.name, 'CHECKIN', timeStr, statusLabel).catch(() => {});
+      await this.sendPushFallback(student.parentId!, student.id, student.name, 'CHECKIN', timeStr, statusLabel);
     }
   }
 
@@ -220,7 +217,7 @@ class NotificationService {
 
     if (!result.success) {
       console.log(`[Push] WA failed for ${student.name}, trying push fallback...`);
-      this.sendPushFallback(student.parentId!, student.name, 'CHECKOUT', timeStr).catch(() => {});
+      await this.sendPushFallback(student.parentId!, student.id, student.name, 'CHECKOUT', timeStr);
     }
   }
 

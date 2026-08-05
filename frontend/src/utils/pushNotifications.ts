@@ -37,25 +37,30 @@ export async function subscribeToPush(
   userId: string,
 ): Promise<boolean> {
   try {
+    console.log('[Push] Starting subscription flow...');
     const permission = await requestNotificationPermission();
+    console.log('[Push] Permission:', permission);
     if (permission !== 'granted') {
       console.log('[Push] Notification permission denied');
       return false;
     }
 
     const reg = await registerServiceWorker();
+    console.log('[Push] SW registration:', reg?.active?.state || 'null');
     if (!reg) return false;
 
     const vapidRes = await fetch('/api/push/vapid-public-key', {
       headers: { Authorization: `Bearer ${token}` },
     });
     const vapidData = await vapidRes.json();
+    console.log('[Push] VAPID response:', vapidData.success, vapidData.data?.publicKey?.substring(0, 20) + '...');
     if (!vapidData.success || !vapidData.data?.publicKey) {
       console.log('[Push] VAPID key not available');
       return false;
     }
 
     const existingSub = await reg.pushManager.getSubscription();
+    console.log('[Push] Existing subscription:', !!existingSub);
     if (existingSub) {
       console.log('[Push] Already subscribed, syncing to server');
       await sendSubscriptionToServer(token, userId, existingSub);
@@ -63,12 +68,13 @@ export async function subscribeToPush(
     }
 
     const applicationServerKey = urlBase64ToUint8Array(vapidData.data.publicKey).buffer;
+    console.log('[Push] Calling PushManager.subscribe...');
     const subscription = await reg.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: applicationServerKey as BufferSource,
     });
 
-    console.log('[Push] Subscribed to push notifications');
+    console.log('[Push] PushManager.subscribe succeeded, endpoint:', subscription.endpoint.substring(0, 50) + '...');
     await sendSubscriptionToServer(token, userId, subscription);
     return true;
   } catch (err) {
@@ -83,7 +89,7 @@ async function sendSubscriptionToServer(
   subscription: PushSubscription,
 ): Promise<void> {
   const subJSON = subscription.toJSON();
-  await fetch('/api/push/subscribe', {
+  const res = await fetch('/api/push/subscribe', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -98,6 +104,12 @@ async function sendSubscriptionToServer(
       userAgent: navigator.userAgent,
     }),
   });
+  const data = await res.json();
+  if (!data.success) {
+    console.error('[Push] Server subscribe failed:', data.error);
+    throw new Error(data.error || 'Failed to save subscription');
+  }
+  console.log('[Push] Subscription saved on server');
 }
 
 export async function unsubscribeFromPush(

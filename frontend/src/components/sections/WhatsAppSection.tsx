@@ -125,7 +125,7 @@ export const WhatsAppSection: React.FC<Props> = ({ token }) => {
   useEffect(() => {
     const fetchPushCount = async () => {
       try {
-        const res = await fetch('/api/push/subscriptions', { headers: authHeader });
+        const res = await fetch('/api/push/admin/count', { headers: authHeader });
         const data = await res.json();
         if (data.success) setPushSubCount(data.data.count || 0);
       } catch { /* ignore */ }

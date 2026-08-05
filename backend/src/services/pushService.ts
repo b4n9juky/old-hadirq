@@ -1,7 +1,7 @@
 import webPush from 'web-push';
 import { db } from '../db/index.js';
-import { pushSubscriptions, user } from '../db/schema.js';
-import { eq } from 'drizzle-orm';
+import { pushSubscriptions } from '../db/schema.js';
+import { eq, sql } from 'drizzle-orm';
 
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
@@ -24,63 +24,83 @@ class PushService {
     endpoint: string;
     keys: { p256dh: string; auth: string };
   }, userAgent?: string) {
-    const existing = await db
-      .select()
-      .from(pushSubscriptions)
-      .where(eq(pushSubscriptions.userId, userId))
-      .limit(100);
+    try {
+      const existing = await db
+        .select()
+        .from(pushSubscriptions)
+        .where(eq(pushSubscriptions.userId, userId))
+        .limit(100);
 
-    const alreadyExists = existing.find(s => s.endpoint === subscription.endpoint);
-    if (alreadyExists) return alreadyExists;
+      const alreadyExists = existing.find(s => s.endpoint === subscription.endpoint);
+      if (alreadyExists) return alreadyExists;
 
-    if (existing.length >= 3) {
-      await db
-        .delete(pushSubscriptions)
-        .where(eq(pushSubscriptions.id, existing[0].id));
+      if (existing.length >= 3) {
+        await db
+          .delete(pushSubscriptions)
+          .where(eq(pushSubscriptions.id, existing[0].id));
+      }
+
+      await db.insert(pushSubscriptions).values({
+        userId,
+        endpoint: subscription.endpoint,
+        p256dh: subscription.keys.p256dh,
+        auth: subscription.keys.auth,
+        userAgent: userAgent || null,
+      });
+
+      const inserted = await db
+        .select()
+        .from(pushSubscriptions)
+        .where(eq(pushSubscriptions.endpoint, subscription.endpoint))
+        .limit(1);
+
+      return inserted[0] || null;
+    } catch (err: any) {
+      console.error('[Push] subscribe error:', err.message);
+      return null;
     }
-
-    await db.insert(pushSubscriptions).values({
-      userId,
-      endpoint: subscription.endpoint,
-      p256dh: subscription.keys.p256dh,
-      auth: subscription.keys.auth,
-      userAgent: userAgent || null,
-    });
-
-    const inserted = await db
-      .select()
-      .from(pushSubscriptions)
-      .where(eq(pushSubscriptions.endpoint, subscription.endpoint))
-      .limit(1);
-
-    return inserted[0] || null;
   }
 
   async unsubscribe(userId: string, endpoint: string) {
-    const subs = await db
-      .select()
-      .from(pushSubscriptions)
-      .where(eq(pushSubscriptions.userId, userId));
+    try {
+      const subs = await db
+        .select()
+        .from(pushSubscriptions)
+        .where(eq(pushSubscriptions.userId, userId));
 
-    const sub = subs.find(s => s.endpoint === endpoint);
-    if (!sub) return false;
+      const sub = subs.find(s => s.endpoint === endpoint);
+      if (!sub) return false;
 
-    await db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, sub.id));
-    return true;
+      await db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, sub.id));
+      return true;
+    } catch (err: any) {
+      console.error('[Push] unsubscribe error:', err.message);
+      return false;
+    }
   }
 
   async getSubscriptionsByUserId(userId: string) {
-    return db
-      .select()
-      .from(pushSubscriptions)
-      .where(eq(pushSubscriptions.userId, userId));
+    try {
+      return await db
+        .select()
+        .from(pushSubscriptions)
+        .where(eq(pushSubscriptions.userId, userId));
+    } catch (err: any) {
+      console.error('[Push] getSubscriptionsByUserId error:', err.message);
+      return [];
+    }
   }
 
   async getSubscriptionCount() {
-    const [result] = await db
-      .select({ count: pushSubscriptions.id })
-      .from(pushSubscriptions);
-    return result ? 1 : 0;
+    try {
+      const [result] = await db
+        .select({ count: sql`COUNT(*)` })
+        .from(pushSubscriptions);
+      return Number(result?.count || 0);
+    } catch (err: any) {
+      console.error('[Push] getSubscriptionCount error:', err.message);
+      return 0;
+    }
   }
 
   async sendPushNotification(
@@ -93,7 +113,10 @@ class PushService {
     }
 
     const subscriptions = await this.getSubscriptionsByUserId(userId);
-    if (subscriptions.length === 0) return { sent: 0, failed: 0 };
+    if (subscriptions.length === 0) {
+      console.log(`[Push] No subscriptions found for user ${userId}`);
+      return { sent: 0, failed: 0 };
+    }
 
     const pushPayload = JSON.stringify({
       title: payload.title,

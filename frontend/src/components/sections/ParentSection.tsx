@@ -64,6 +64,7 @@ export const ParentSection: React.FC<Props> = ({ token, user }) => {
   const [expandedChild, setExpandedChild] = useState<number | null>(null);
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushLoading, setPushLoading] = useState(false);
+  const [pushMsg, setPushMsg] = useState('');
 
   useEffect(() => {
     fetchChildren();
@@ -77,15 +78,21 @@ export const ParentSection: React.FC<Props> = ({ token, user }) => {
   const handleTogglePush = async () => {
     if (!user.id) return;
     setPushLoading(true);
+    setPushMsg('');
     try {
       if (pushEnabled) {
         await unsubscribeFromPush(token, user.id);
         setPushEnabled(false);
+        setPushMsg('Notifikasi dinonaktifkan.');
       } else {
+        setPushMsg('Meminta izin...');
         const ok = await subscribeToPush(token, user.id);
         setPushEnabled(ok);
+        setPushMsg(ok ? 'Notifikasi berhasil diaktifkan!' : 'Gagal mengaktifkan notifikasi. Cek console browser untuk detail.');
       }
-    } catch { /* ignore */ } finally {
+    } catch (err: any) {
+      setPushMsg('Error: ' + (err.message || 'Unknown'));
+    } finally {
       setPushLoading(false);
     }
   };
@@ -177,6 +184,17 @@ export const ParentSection: React.FC<Props> = ({ token, user }) => {
             {pushLoading ? '...' : pushEnabled ? 'Nonaktifkan' : 'Aktifkan'}
           </button>
         </div>
+        {pushMsg && (
+          <div className={`mt-2 text-2xs px-3 py-1.5 rounded-lg ${
+            pushMsg.includes('berhasil') || pushMsg.includes('diaktifkan')
+              ? 'bg-emerald-500/10 text-emerald-500'
+              : pushMsg.includes('Gagal') || pushMsg.includes('Error')
+              ? 'bg-destructive/10 text-destructive'
+              : 'bg-muted text-muted-foreground'
+          }`}>
+            {pushMsg}
+          </div>
+        )}
       </div>
 
       <div className="p-6 space-y-6">
