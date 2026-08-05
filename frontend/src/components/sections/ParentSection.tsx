@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Users, Clock, CalendarDays, ChevronDown, ChevronUp, Filter, Bell, BellOff } from 'lucide-react';
 import { useTimezone } from '../../hooks/useTimezone';
-import { subscribeToPush, isPushSubscribed, unsubscribeFromPush } from '../../utils/pushNotifications';
+import { subscribeToPush, isPushSubscribed, unsubscribeFromPush, getPermissionStatus } from '../../utils/pushNotifications';
 
 interface ChildRecord {
   id: number;
@@ -85,6 +85,12 @@ export const ParentSection: React.FC<Props> = ({ token, user }) => {
         setPushEnabled(false);
         setPushMsg('Notifikasi dinonaktifkan.');
       } else {
+        const perm = getPermissionStatus();
+        if (perm === 'denied') {
+          setPushMsg('Izin notifikasi ditolak. Buka Pengaturan Browser → Privasi → Notifikasi → izinkan situs ini.');
+          setPushLoading(false);
+          return;
+        }
         setPushMsg('Meminta izin...');
         const ok = await subscribeToPush(token, user.id);
         setPushEnabled(ok);

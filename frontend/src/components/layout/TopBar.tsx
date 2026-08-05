@@ -1,17 +1,4 @@
-import { useNavigate } from 'react-router-dom';
 import { RefreshCw, CheckCircle } from 'lucide-react';
-
-const sectionMap: Record<string, string> = {
-  dashboard: '/dashboard/ringkasan',
-  users: '/dashboard/pengguna',
-  classes: '/dashboard/kelas',
-  students: '/dashboard/siswa',
-  academic: '/dashboard/akademik',
-  'teaching-schedule': '/dashboard/jadwal-mengajar',
-  subjects: '/dashboard/mata-pelajaran',
-  'agenda-attendance': '/dashboard/agenda-absensi',
-  settings: '/dashboard/pengaturan',
-};
 
 const allOptions = [
   { value: 'dashboard', label: 'Dashboard', roles: ['admin', 'guru'] },
@@ -35,7 +22,6 @@ interface Props {
 }
 
 export const TopBar: React.FC<Props> = ({ activeSection, onSectionChange, onRefresh, isLoading, user }) => {
-  const navigate = useNavigate();
   const options = allOptions.filter(item => item.roles.includes(user.role));
 
   return (
@@ -55,11 +41,7 @@ export const TopBar: React.FC<Props> = ({ activeSection, onSectionChange, onRefr
         <div className="md:hidden">
           <select
             value={activeSection}
-            onChange={(e) => {
-              const section = e.target.value;
-              onSectionChange(section);
-              navigate(sectionMap[section] || '/dashboard/ringkasan');
-            }}
+            onChange={(e) => onSectionChange(e.target.value)}
             className="bg-muted/50 border border-border rounded-lg px-2.5 py-2 text-sm font-medium text-foreground focus:border-primary/50 transition-colors"
             aria-label="Navigasi menu"
           >

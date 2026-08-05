@@ -32,6 +32,11 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
   return Notification.requestPermission();
 }
 
+export function getPermissionStatus(): NotificationPermission {
+  if (!('Notification' in window)) return 'denied';
+  return Notification.permission;
+}
+
 export async function subscribeToPush(
   token: string,
   userId: string,

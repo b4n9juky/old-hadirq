@@ -76,7 +76,7 @@ function App() {
             !token || !user ? (
               <LoginScreen onLoginSuccess={handleLoginSuccess} />
             ) : (
-              <Navigate to="/dashboard/ringkasan" replace />
+              <Navigate to={user?.role === 'parent' ? '/dashboard/orang-tua' : '/dashboard/ringkasan'} replace />
             )
           }
         />
@@ -107,7 +107,7 @@ function App() {
           <Route path="cetak-kartu-siswa" element={<StudentCardPrintSection token={token!} />} />
           <Route path="whatsapp" element={user?.role === 'admin' ? <WhatsAppSection token={token!} /> : <Navigate to="/dashboard/ringkasan" replace />} />
         </Route>
-        <Route path="*" element={<Navigate to={token && user ? '/dashboard/ringkasan' : '/login'} replace />} />
+        <Route path="*" element={<Navigate to={token && user ? (user.role === 'parent' ? '/dashboard/orang-tua' : '/dashboard/ringkasan') : '/login'} replace />} />
       </Routes>
     </HashRouter>
   );

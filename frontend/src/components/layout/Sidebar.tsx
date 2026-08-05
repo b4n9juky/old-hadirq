@@ -1,4 +1,3 @@
-import { useNavigate } from 'react-router-dom';
 import { LogOut, Users, LayoutDashboard, BookOpen, GraduationCap, Calendar, Settings, Clock, Book, ClipboardCheck, GraduationCap as SchoolIcon, FileText, UserCheck, Printer, CreditCard, MessageCircle } from 'lucide-react';
 import { ThemeToggle } from '../shared/ThemeToggle';
 
@@ -28,7 +27,6 @@ interface Props {
 }
 
 export const Sidebar: React.FC<Props> = ({ activeSection, onSectionChange, user, onLogout }) => {
-  const navigate = useNavigate();
   const navItems = allNavItems.filter(item => item.roles.includes(user.role));
 
   return (
@@ -48,12 +46,12 @@ export const Sidebar: React.FC<Props> = ({ activeSection, onSectionChange, user,
       </div>
 
       <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
-        {navItems.map(({ path, key, icon: Icon, label }) => {
+        {navItems.map(({ key, icon: Icon, label }) => {
           const isActive = activeSection === key;
           return (
             <button
               key={key}
-              onClick={() => { onSectionChange(key); navigate(path); }}
+              onClick={() => onSectionChange(key)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
                 isActive
                   ? 'bg-primary/10 text-primary border border-primary/20'
